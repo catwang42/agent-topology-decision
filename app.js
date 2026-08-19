@@ -56,6 +56,7 @@
   ];
 
   var LAST_BEAT = BEATS.length - 1;
+  var ROLLOUT_BEAT = 7;                      // the eight week rollout, stepped by hand
   var FREE = LAST_BEAT;
   var NUMBERED_BEATS = FREE;                 // beats zero through eight
 
@@ -67,6 +68,7 @@
   var FIT_PADDING = 0.06;                    // six percent, per the layout grid
   var PANEL_SPACE = 424;                     // width the spend panel takes back
   var CARD_SPACE = 724;                      // width the decision card takes back
+  var QUESTION_SPACE = 104;                  // height the cold open question takes back
 
   function readBandHeight() {
     if (!window.getComputedStyle) return 0;
@@ -90,6 +92,13 @@
   var timers = [];
   var stageScale = 1;
   var hoverNode = null;
+
+  /* How long a change takes. A beat is a scene change and gets the full
+     easing; a rollout week is one step inside a single scene, and the
+     presenter is going to take eight of them in a row, so it gets half. */
+  var BEAT_MOTION = { node: 820, ring: 760, mark: 640 };
+  var WEEK_MOTION = { node: 500, ring: 500, mark: 420 };
+  var motion = BEAT_MOTION;
 
   var REDUCED = !!(window.matchMedia &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -134,6 +143,43 @@
   var SURFACE = '#0F1524';
   var DORMANT = '#1E293B';
 
+  // The wires get a floor for the same reason the glyphs do.
+  var EDGE_SLATE = '#3D4C66';
+  var EDGE_FLOOR = 0.26;
+
+  /* The visibility floor.
+   *
+   * No call site is ever dimmer than this, at any beat, under any filter: a
+   * two pixel cool slate ring, a faint interior, and its name at roughly
+   * seventy percent. The ring clears three to one against the background, so
+   * it reads from the back of a room rather than only from a chair.
+   *
+   * This is not decoration. The argument the page makes is that four call
+   * sites out of nineteen hold the money, and that argument needs the other
+   * fifteen on screen to be an argument at all. Dimming them to nothing
+   * turned the claim into a picture of four circles.
+   *
+   * Heat therefore works as a range above the floor. Beat three's die back
+   * takes a cold call site down TO the floor and stops there.
+   */
+  var FLOOR = {
+    stroke: '#B4C4D8',
+    strokeOpacity: 0.48,
+    strokeWidth: 2,
+    fill: '#141D2E',
+    label: 0.7
+  };
+
+  /* One step above the floor, and the whole system wears it: beats zero, one
+     and two, before anybody has been told where the money is. */
+  var NEUTRAL = {
+    stroke: '#B4C4D8',
+    strokeOpacity: 0.72,
+    strokeWidth: 2,
+    fill: '#18233A',
+    label: 0.88
+  };
+
   var STATUS_COLOR = {
     unmeasured: '#334155',
     measured: '#38BDF8',
@@ -170,9 +216,15 @@
   var edgeKey = {};
   links.forEach(function (link) { edgeKey[link.source + '>' + link.target] = link; });
 
+  /* Call volume, as radius. The floor of the range is set by legibility rather
+     than by the data: a ring has to be about thirty pixels across at the fit
+     the camera settles on before an audience can see that it is a ring at all,
+     and a call site nobody can see is a call site that is not in the argument.
+     That costs some dynamic range at the quiet end, which is the cheaper of
+     the two losses — colour carries the money, radius only carries volume. */
   var radius = d3.scaleSqrt()
     .domain([0, d3.max(nodes, function (n) { return n.calls; })])
-    .range([11, 28]);
+    .range([17, 31]);
 
   /* Call site names are written out in full, per rule three, and written out
      in full they are wide enough to collide with each other on one line. So
@@ -296,6 +348,10 @@
 
   // ----------------------------------------------------------------- layout
 
+  /* Seven layers have to fit the canvas band, and the band is what decides
+     how large a glyph is on the screen, so this gap is kept tight and the
+     room a name needs is bought sideways instead — see the relaxation pass
+     at the end of the layout. */
   var LAYER_GAP = 64;
 
   (function computeLayout() {
@@ -321,7 +377,61 @@
       node.x = Math.max(0, Math.min(1140, node.x));
       node.y = node.layer * LAYER_GAP;
     });
+
+    /* Circles pack, names do not. The simulation keeps the glyphs apart, but
+       a name hangs below its glyph and can come to rest on the call site
+       underneath it — and a name sitting on a glyph is a glyph the audience
+       cannot read. So relax sideways until nothing sits on anything.
+
+       Sideways is the direction with room to spend: the picture is seven
+       layers deep and the canvas band is the short dimension, so the camera
+       is fitting on height and a wider graph costs nothing until the width
+       catches up. */
+    for (var pass = 0; pass < 320; pass += 1) {
+      var moved = false;
+      for (var a = 0; a < nodes.length; a += 1) {
+        for (var b = a + 1; b < nodes.length; b += 1) {
+          var overlap = worstOverlap(nodes[a], nodes[b]);
+          if (overlap <= 0) continue;
+          var step = overlap / 2 + 0.4;
+          var direction = nodes[a].x <= nodes[b].x ? -1 : 1;
+          nodes[a].x += direction * step * 0.55;
+          nodes[b].x -= direction * step * 0.55;
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
   }());
+
+  /* The two rectangles a call site occupies: the glyph, and the name under
+     it. Both are generous by a couple of pixels, so "just touching" counts as
+     touching. */
+  function occupancy(d) {
+    var half = d.labelHalfWidth + 6;
+    var labelTop = d.y + d.r + 11;
+    return {
+      glyph: { x0: d.x - d.r - 3, x1: d.x + d.r + 3,
+               y0: d.y - d.r - 3, y1: d.y + d.r + 3 },
+      label: { x0: d.x - half, x1: d.x + half,
+               y0: labelTop, y1: labelTop + 6 + d.labelLines.length * 13 }
+    };
+  }
+
+  // How far apart two call sites have to move before none of their four
+  // rectangles touch. Zero when they already clear each other.
+  function worstOverlap(one, other) {
+    var a = occupancy(one);
+    var b = occupancy(other);
+    var worst = 0;
+    [[a.glyph, b.glyph], [a.glyph, b.label], [a.label, b.glyph], [a.label, b.label]]
+      .forEach(function (pair) {
+        var wide = Math.min(pair[0].x1, pair[1].x1) - Math.max(pair[0].x0, pair[1].x0);
+        var tall = Math.min(pair[0].y1, pair[1].y1) - Math.max(pair[0].y0, pair[1].y0);
+        if (wide > 0 && tall > 0 && wide > worst) worst = wide;
+      });
+    return worst;
+  }
 
   /* How much room a glyph needs around its centre. The camera uses this, so
      the widest halo and the label underneath are inside the frame by
@@ -547,22 +657,24 @@
   }
 
   function targetCamera() {
-    /* At the cold open there is one call site on screen and a question above
-       it, so the camera holds low in the frame and leaves the top of the band
-       to the question. From beat one on it frames the whole system, centred in
-       whatever the overlays have left. */
-    var coldOpen = state.beat === 0;
-    var subset = coldOpen ? nodes.filter(function (d) { return d.layer === 0; }) : nodes;
-    var bounds = boundsOf(subset);
+    /* Every call site is on screen at every beat, so the camera frames the
+       whole system at every beat too. The cold open is an exception to the
+       framing, not to the content: the question needs the top of the band, so
+       the system is fitted into what is left underneath it and the audience
+       sees the shape of the thing before the first word of the story. */
+    var bounds = boundsOf(nodes);
     var width = CANVAS_W - overlaySpace();
-    var availableWidth = width * (1 - 2 * FIT_PADDING);
-    var availableHeight = CANVAS_H * (1 - 2 * FIT_PADDING);
-    var k = Math.min(availableWidth / bounds.w, availableHeight / bounds.h, coldOpen ? 1.3 : 1.6);
-    var anchor = coldOpen ? 0.66 : 0.5;
+    var top = state.beat === 0 ? QUESTION_SPACE : 0;
+    var height = CANVAS_H - top;
+    var k = Math.min(
+      width * (1 - 2 * FIT_PADDING) / bounds.w,
+      height * (1 - 2 * FIT_PADDING) / bounds.h,
+      1.6
+    );
     return {
       k: k,
       x: width / 2 - k * (bounds.x + bounds.w / 2),
-      y: CANVAS_H * anchor - k * (bounds.y + bounds.h / 2)
+      y: top + height / 2 - k * (bounds.y + bounds.h / 2)
     };
   }
 
@@ -823,11 +935,10 @@
   var scrubRange = document.getElementById('scrub-range');
   scrubRange.max = String(WEEKS);
   scrubRange.addEventListener('input', function () {
-    // A hand on the scrubber wins over the scripted sweep.
-    clearTimers();
-    state.week = Number(scrubRange.value);
-    if (state.beat < 7) state.beat = 7;
-    render();
+    // Dragging and stepping are one control with two handles. Both land here,
+    // so the pill, the week marker and the graph cannot disagree about which
+    // week is on screen.
+    goToWeek(Number(scrubRange.value));
   });
 
   // --------------------------------------------------------------- tooltip
@@ -1083,8 +1194,7 @@
     return {
       coldOpen: beat === 0,
       counter: beat === 1,
-      onlyOrchestrator: beat === 0,
-      allNodes: beat >= 2,
+      trajectory: beat === 1,
       heat: beat >= 3,
       // Beat eight is the scoreboard's alone: the panel would sit behind it,
       // legible through the scrim, saying something the close has moved past.
@@ -1134,21 +1244,35 @@
     }
 
     // Nodes -----------------------------------------------------------------
-    nodeSel.attr('opacity', function (d) {
-      if (v.allNodes) {
-        if (!v.heat) return 1;
-        if (snapshot.rows[d.id].hot) return 1;
-        // Once the rollout starts, anything with a status is part of the story
-        // and stays legible even if it has cooled out of the top four.
-        if (beat >= 7 && snapshot.rows[d.id].status !== 'unmeasured') return 1;
-        // The orchestrator comes back up at beat five so its "measure last"
-        // badge can be read. Refusing a verdict there is the point of the beat.
-        if (v.badges && d.behavior_class === 'orchestration') return 0.6;
-        return 0.1;
+
+    /* Which of the four visibility states each call site is wearing. There is
+       no fifth state below the floor and no group opacity fading anything
+       towards zero: the dimmest a call site ever gets is a state somebody
+       chose, and it is still a ring you can read across a room. */
+    function tierOf(d) {
+      var row = snapshot.rows[d.id];
+      if (!v.heat) {
+        // Beats zero, one and two. During the trajectory the call sites the
+        // run has already touched are lit and the rest hold the neutral
+        // state, so what the audience watches is a path through a system
+        // rather than a path through the dark.
+        if (v.trajectory) return revealed[d.id] ? 'lit' : 'neutral';
+        if (v.coldOpen && d.layer === 0) return 'lit';
+        return 'neutral';
       }
-      if (v.onlyOrchestrator) return d.layer === 0 ? 1 : 0;
-      return revealed[d.id] ? 1 : 0.06;
-    });
+      if (row.hot) return 'live';
+      // Once the rollout starts, anything with a status is part of the story
+      // and stays lit even if it has cooled out of the top four.
+      if (beat >= 7 && row.status !== 'unmeasured') return 'live';
+      // The orchestrator comes back up a step at beat five so its "measure
+      // last" badge has a subject. Refusing a verdict is the point of the
+      // beat, and a refusal needs something to refuse about.
+      if (v.badges && d.behavior_class === 'orchestration') return 'neutral';
+      return 'floor';
+    }
+
+    nodeSel.attr('opacity', 1)
+      .attr('data-tier', tierOf);
 
     nodeSel.classed('hot', warm);
     nodeSel.classed('migrated', function (d) {
@@ -1156,23 +1280,36 @@
     });
 
     nodeSel.select('.node-body')
-      .transition().duration(820).ease(d3.easeCubicInOut)
+      .transition().duration(motion.node).ease(d3.easeCubicInOut)
       .attr('fill', function (d) {
+        var tier = tierOf(d);
         var row = snapshot.rows[d.id];
-        if (!v.heat) return SURFACE;
-        if (row.status === 'migrated') return mix(SURFACE, STATUS_COLOR.migrated, 0.2);
-        if (!row.hot) return mix(SURFACE, DORMANT, 0.5);
-        return mix(SURFACE, nodeColor(d), 0.26);
+        if (tier === 'floor') return FLOOR.fill;
+        if (tier === 'neutral') return NEUTRAL.fill;
+        if (tier === 'lit') return mix(NEUTRAL.fill, CYAN, 0.24);
+        if (row.status === 'migrated') return mix(SURFACE, STATUS_COLOR.migrated, 0.22);
+        return mix(SURFACE, nodeColor(d), 0.28);
       })
       .attr('stroke', function (d) {
+        var tier = tierOf(d);
         var row = snapshot.rows[d.id];
-        if (!v.heat) return DORMANT;
+        if (tier === 'floor') return FLOOR.stroke;
+        if (tier === 'neutral') return NEUTRAL.stroke;
+        if (tier === 'lit') return CYAN;
         if (row.status === 'migrated') return STATUS_COLOR.migrated;
-        return row.hot ? nodeColor(d) : DORMANT;
+        return nodeColor(d);
+      })
+      .attr('stroke-opacity', function (d) {
+        var tier = tierOf(d);
+        if (tier === 'floor') return FLOOR.strokeOpacity;
+        if (tier === 'neutral') return NEUTRAL.strokeOpacity;
+        return 1;
       })
       .attr('stroke-width', function (d) {
-        var row = snapshot.rows[d.id];
-        return v.heat && (row.hot || row.status === 'migrated') ? 1.8 : 1.1;
+        var tier = tierOf(d);
+        if (tier === 'floor') return FLOOR.strokeWidth;
+        if (tier === 'neutral') return NEUTRAL.strokeWidth;
+        return 2.4;
       });
 
     glowSel
@@ -1180,7 +1317,7 @@
         if (snapshot.rows[d.id].status === 'hold') return glowGradient(STATUS_COLOR.hold);
         return glowGradient(nodeColor(d));
       })
-      .transition().duration(820).ease(d3.easeCubicInOut)
+      .transition().duration(motion.node).ease(d3.easeCubicInOut)
       .attr('r', function (d) {
         var row = snapshot.rows[d.id];
         return warm(d) ? d.r + 16 + row.heat * 26 : 0;
@@ -1199,7 +1336,7 @@
         var sweep = circumference * snapshot.rows[d.id].heat;
         return sweep + ' ' + circumference;
       })
-      .transition().duration(760).ease(d3.easeCubicInOut)
+      .transition().duration(motion.ring).ease(d3.easeCubicInOut)
       .attr('opacity', function (d) {
         if (!v.heat) return 0;
         return snapshot.rows[d.id].hot ? 0.95 : 0;
@@ -1214,19 +1351,19 @@
 
     nodeSel.select('.core')
       .attr('fill', nodeColor)
-      .transition().duration(760).ease(d3.easeCubicInOut)
+      .transition().duration(motion.ring).ease(d3.easeCubicInOut)
       .attr('r', function (d) { return v.reasoning && warm(d) ? coreRadius(d) : 0; })
       .attr('opacity', function (d) { return v.reasoning && warm(d) ? 1 : 0; });
 
     nodeSel.select('.core-bloom')
       .attr('fill', function (d) { return glowGradient(nodeColor(d)); })
-      .transition().duration(760).ease(d3.easeCubicInOut)
+      .transition().duration(motion.ring).ease(d3.easeCubicInOut)
       .attr('r', function (d) { return v.reasoning && warm(d) ? coreRadius(d) * 2.4 : 0; })
       .attr('opacity', function (d) { return v.reasoning && warm(d) ? 1 : 0; });
 
     nodeSel.select('.core-text')
       .text(function (d) { return fmtPct0(snapshot.rows[d.id].reasoningShare); })
-      .transition().duration(700)
+      .transition().duration(motion.mark)
       .attr('opacity', function (d) {
         return v.reasoning && warm(d) && coreRadius(d) >= 11 ? 1 : 0;
       });
@@ -1235,11 +1372,13 @@
       .attr('stroke', function (d) {
         var row = snapshot.rows[d.id];
         if (row.status === 'migrated') return STATUS_COLOR.migrated;
-        return row.hot ? nodeColor(d) : '#475569';
+        // A cold class ring still has to be readable — the behaviour class of
+        // the fifteen quiet call sites is half of what beat five is saying.
+        return row.hot ? nodeColor(d) : '#8496AC';
       })
       .attr('stroke-width', function (d) { return CLASS_STROKE[d.behavior_class].width; })
       .attr('stroke-dasharray', function (d) { return CLASS_STROKE[d.behavior_class].dash; })
-      .transition().duration(640)
+      .transition().duration(motion.mark)
       .attr('opacity', v.classRings ? 0.9 : 0);
 
     nodeSel.select('.node-badge')
@@ -1251,7 +1390,7 @@
         if (d.behavior_class === 'retrieval') return 'trajectory instrument';
         return 'measurable now';
       })
-      .transition().duration(640)
+      .transition().duration(motion.mark)
       .attr('opacity', function (d) {
         if (!v.badges) return 0;
         return snapshot.rows[d.id].hot || d.behavior_class === 'orchestration' ? 0.95 : 0;
@@ -1259,39 +1398,46 @@
 
     nodeSel.select('.status-dot')
       .attr('fill', function (d) { return STATUS_COLOR[snapshot.rows[d.id].status]; })
-      .transition().duration(640)
+      .transition().duration(motion.mark)
       .attr('opacity', function (d) {
         if (beat < 7) return 0;
         return snapshot.rows[d.id].status === 'unmeasured' ? 0 : 1;
       });
 
     nodeSel.select('.node-label')
-      .transition().duration(640)
+      .transition().duration(motion.mark)
       .attr('opacity', function (d) {
-        if (!v.allNodes) return revealed[d.id] || (v.onlyOrchestrator && d.layer === 0) ? 1 : 0;
+        var tier = tierOf(d);
+        if (tier === 'floor') return FLOOR.label;
+        if (tier === 'neutral') return NEUTRAL.label;
         return 1;
       });
 
     // Edges -----------------------------------------------------------------
-    // The lines are only a scaffold now; the particles carry the traffic.
+    /* The lines are only a scaffold now; the particles carry the traffic. They
+       have a floor of their own, for the same reason the glyphs do — a call
+       site with no visible wire into it is a call site the audience reads as
+       decoration rather than as part of the system. */
     edgeSel
-      .transition().duration(760).ease(d3.easeCubicInOut)
+      .transition().duration(motion.ring).ease(d3.easeCubicInOut)
       .attr('opacity', function (d) {
-        if (!v.allNodes) return litEdges[d.source.id + '>' + d.target.id] ? 0.7 : 0.05;
-        if (!v.heat) return 0.3;
+        if (v.trajectory) return litEdges[d.source.id + '>' + d.target.id] ? 0.72 : EDGE_FLOOR;
+        if (!v.heat) return 0.34;
         var live = snapshot.rows[d.source.id].hot && snapshot.rows[d.target.id].hot;
-        return live ? 0.42 : 0.06;
+        return live ? 0.46 : EDGE_FLOOR;
       })
       .attr('stroke', function (d) {
-        if (!v.heat) return litEdges[d.source.id + '>' + d.target.id] ? CYAN : DORMANT;
+        if (!v.heat) {
+          return v.trajectory && litEdges[d.source.id + '>' + d.target.id] ? CYAN : EDGE_SLATE;
+        }
         var live = snapshot.rows[d.source.id].hot && snapshot.rows[d.target.id].hot;
         return live ? HEAT_RAMP(Math.max(snapshot.rows[d.source.id].heat,
-                                         snapshot.rows[d.target.id].heat)) : DORMANT;
+                                         snapshot.rows[d.target.id].heat)) : EDGE_SLATE;
       })
       .style('color', function (d) {
-        if (!v.heat) return DORMANT;
+        if (!v.heat) return EDGE_SLATE;
         var live = snapshot.rows[d.source.id].hot && snapshot.rows[d.target.id].hot;
-        return live ? CYAN : DORMANT;
+        return live ? CYAN : EDGE_SLATE;
       });
 
     updateFlow(snapshot, v);
@@ -1304,12 +1450,23 @@
 
     scrubRange.value = String(snapshot.week);
 
+    /* The rollout beat, and only the rollout beat. The scrubber stays live
+       after it, but a line saying what this week did belongs to the eight
+       presses that walk the weeks. */
+    var stepping = state.beat === ROLLOUT_BEAT;
+    d3.select('#week-event')
+      .classed('on', stepping)
+      .html(stepping ? weekEventLine(snapshot.week) : '');
+
     var beatMeta = BEATS[beat];
     d3.select('#caption-beat').text(beatMeta.tag);
     d3.select('#caption-line').text(beatMeta.line);
-    d3.select('#beat-count').text(beat === FREE
-      ? 'pan, zoom and hover'
-      : 'beat ' + (beat + 1) + ' of ' + NUMBERED_BEATS);
+    d3.select('#beat-count').text(
+      beat === FREE ? 'pan, zoom and hover'
+        : beat === ROLLOUT_BEAT
+          ? 'beat ' + (beat + 1) + ' of ' + NUMBERED_BEATS +
+            ' · week ' + snapshot.week + ' of ' + WEEKS
+          : 'beat ' + (beat + 1) + ' of ' + NUMBERED_BEATS);
 
     renderNavigation();
 
@@ -1355,6 +1512,61 @@
     );
   }
 
+  /* What this rollout week did, in one line, derived from the timeline rather
+     than authored a second time beside it — so a change to
+     data/status_timeline.json cannot leave the caption contradicting the
+     graph. A week where no status moves says what is being watched instead,
+     because "nothing happened" is the wrong reading: the instruments are
+     running, and that is the week's work. */
+  function weekEventLine(week) {
+    var changes = [];
+    nodes.forEach(function (node) {
+      var now = statusOf(node.id, week);
+      var before = week > 1 ? statusOf(node.id, week - 1) : 'unmeasured';
+      if (now !== before) changes.push({ node: node, from: before, to: now });
+    });
+
+    var direction;
+    if (week === 1) {
+      direction = '<span class="week-flat">the rate everything is compared against</span>';
+    } else {
+      var spendNow = weeklySpendPerDay(week);
+      var spendBefore = weeklySpendPerDay(week - 1);
+      if (spendNow < spendBefore - 0.5) {
+        direction = '<span class="delta-down">spend ▼ ' +
+          fmtUsd0(spendBefore - spendNow) + ' a day</span>';
+      } else if (spendNow > spendBefore + 0.5) {
+        direction = '<span class="delta-up">spend ▲ ' +
+          fmtUsd0(spendNow - spendBefore) + ' a day</span>';
+      } else {
+        direction = '<span class="week-flat">spend unchanged</span>';
+      }
+    }
+
+    var body;
+    if (changes.length) {
+      body = changes.map(function (change) {
+        return '<b>' + change.node.label + '</b> ' +
+          statusMeta(change.from).label.toLowerCase() + ' → ' +
+          '<span style="color:' + STATUS_COLOR[change.to] + '">' +
+          statusMeta(change.to).label.toLowerCase() + '</span>';
+      }).join('<span class="week-event-sep">·</span>');
+    } else {
+      var watched = nodes.filter(function (node) {
+        return statusOf(node.id, week) !== 'unmeasured';
+      });
+      body = watched.length
+        ? 'no status moves — watching ' + watched.map(function (node) {
+            return '<b>' + node.label + '</b> in ' +
+              statusMeta(statusOf(node.id, week)).label.toLowerCase();
+          }).join(' and ')
+        : 'nothing is under an instrument yet — this is the bill before anything moved';
+    }
+
+    return '<span class="week-event-week">Week ' + week + ' of ' + WEEKS + '</span>' +
+      body + '<span class="week-event-sep">·</span>' + direction;
+  }
+
   /* The daily bill at any rollout week, under the filters currently applied.
      Kept separate from view() so the scrubber can look one week back without
      disturbing the state the rest of the page is rendered from. */
@@ -1394,12 +1606,15 @@
     var orchestrator = nodes.filter(function (n) { return n.layer === 0; })[0];
     if (!orchestrator) return;
     var body = nodeSel.filter(function (d) { return d.id === orchestrator.id; }).select('.node-body');
+    /* Brightness, not colour. The call site is already cyan at this beat
+       because it is the one the question lands on, so the pulse widens and
+       narrows its ring rather than swapping it for another palette. */
     function beat() {
       if (state.beat !== 0) return;
       body.transition().duration(760).ease(d3.easeCubicOut)
-        .attr('stroke', CYAN).attr('stroke-width', 3)
+        .attr('stroke-width', 4).attr('stroke-opacity', 1)
         .transition().duration(760).ease(d3.easeCubicIn)
-        .attr('stroke', DORMANT).attr('stroke-width', 1.2)
+        .attr('stroke-width', 2.2).attr('stroke-opacity', 0.75)
         .on('end', function () { later(beat, 120); });
     }
     beat();
@@ -1443,16 +1658,23 @@
      three things that change: which call sites are lit, which edges are lit,
      and one bright pulse racing down the hop that just happened. */
   function paintReveal() {
-    nodeSel.attr('opacity', function (d) { return revealed[d.id] ? 1 : 0.06; });
-    nodeSel.select('.node-label').attr('opacity', function (d) {
-      return revealed[d.id] ? 1 : 0;
-    });
+    var lit = function (d) { return !!revealed[d.id]; };
+    nodeSel.select('.node-body')
+      .attr('fill', function (d) {
+        return lit(d) ? mix(NEUTRAL.fill, CYAN, 0.24) : NEUTRAL.fill;
+      })
+      .attr('stroke', function (d) { return lit(d) ? CYAN : NEUTRAL.stroke; })
+      .attr('stroke-opacity', function (d) { return lit(d) ? 1 : NEUTRAL.strokeOpacity; })
+      .attr('stroke-width', function (d) { return lit(d) ? 2.4 : NEUTRAL.strokeWidth; });
+    nodeSel.attr('data-tier', function (d) { return lit(d) ? 'lit' : 'neutral'; });
+    nodeSel.select('.node-label')
+      .attr('opacity', function (d) { return lit(d) ? 1 : NEUTRAL.label; });
     edgeSel
       .attr('opacity', function (d) {
-        return litEdges[d.source.id + '>' + d.target.id] ? 0.7 : 0.05;
+        return litEdges[d.source.id + '>' + d.target.id] ? 0.72 : EDGE_FLOOR;
       })
       .attr('stroke', function (d) {
-        return litEdges[d.source.id + '>' + d.target.id] ? CYAN : DORMANT;
+        return litEdges[d.source.id + '>' + d.target.id] ? CYAN : EDGE_SLATE;
       });
   }
 
@@ -1471,21 +1693,6 @@
       String(GRAPH.meta.featured_call_count);
   }
 
-  function runScrubber() {
-    state.week = 1;
-    render();
-    var week = 1;
-    function step() {
-      if (state.beat !== 7) return;
-      week += 1;
-      if (week > WEEKS) return;
-      state.week = week;
-      render();
-      later(step, 900);
-    }
-    later(step, 1100);
-  }
-
   // ------------------------------------------------------------- navigation
 
   var dotSel = d3.select('#beat-dots').selectAll('button.beat-dot')
@@ -1497,6 +1704,25 @@
     .attr('aria-label', function (i) { return BEATS[i].tag; })
     .on('click', function (event, i) { event.stopPropagation(); goTo(i); });
 
+  /* The rollout dot grows into a segmented pill while the deck is inside beat
+     seven. Eight presses that do not change the beat have to show up
+     somewhere, or the presenter loses their place; here each segment is one
+     week, the ones behind are filled, and every segment is clickable. */
+  var dotsHost = document.getElementById('beat-dots');
+  var weekPill = document.createElement('div');
+  weekPill.id = 'week-pill';
+  dotsHost.insertBefore(weekPill, dotsHost.children[ROLLOUT_BEAT + 1] || null);
+
+  var weekSegSel = d3.select(weekPill).selectAll('button')
+    .data(d3.range(1, WEEKS + 1))
+    .join('button')
+    .attr('class', 'week-seg')
+    .attr('type', 'button')
+    .attr('title', function (week) { return 'Rollout week ' + week; })
+    .attr('aria-label', function (week) { return 'Rollout week ' + week; })
+    .text(function (week) { return week; })
+    .on('click', function (event, week) { event.stopPropagation(); goToWeek(week); });
+
   var explorePill = d3.select('#beat-dots').append('button')
     .attr('class', 'beat-pill')
     .attr('type', 'button')
@@ -1507,34 +1733,86 @@
 
   document.getElementById('nav-prev').addEventListener('click', function (event) {
     event.stopPropagation();
-    goTo(state.beat - 1);
+    retreat();
   });
 
   document.getElementById('nav-next').addEventListener('click', function (event) {
     event.stopPropagation();
-    goTo(state.beat + 1);
+    advance();
   });
 
   function renderNavigation() {
+    var inRollout = state.beat === ROLLOUT_BEAT;
     dotSel
-      .classed('on', function (i) { return i === state.beat; })
-      .classed('past', function (i) { return i < state.beat; });
+      .classed('on', function (i) { return i === state.beat && !inRollout; })
+      .classed('past', function (i) { return i < state.beat; })
+      // The rollout dot is not hidden so much as unrolled: the pill takes its
+      // place in the row, at the position it was standing in.
+      .classed('folded', function (i) { return inRollout && i === ROLLOUT_BEAT; });
+    d3.select(weekPill).classed('on', inRollout);
+    weekSegSel
+      .classed('on', function (week) { return inRollout && week === state.week; })
+      .classed('past', function (week) { return inRollout && week < state.week; });
     explorePill.classed('on', state.beat === FREE);
     document.getElementById('nav-prev').disabled = state.beat === 0;
     document.getElementById('nav-next').disabled = state.beat === FREE;
   }
 
+  /* What the right arrow, the space bar, the forward button and a click on
+     the canvas all mean.
+     *
+     * Beat seven is eight beats wearing one coat. Inside it an advance steps
+     * exactly one rollout week and nothing else moves, because the presenter
+     * is saying a sentence about each week and a timer that runs ahead of
+     * them is a timer they have to apologise for. Only week eight hands the
+     * deck on to the close; only week one hands it back to the decision.
+     */
+  function advance() {
+    if (state.beat === ROLLOUT_BEAT && state.week < WEEKS) {
+      goToWeek(state.week + 1);
+      return;
+    }
+    goTo(state.beat + 1);
+  }
+
+  function retreat() {
+    if (state.beat === ROLLOUT_BEAT && state.week > 1) {
+      goToWeek(state.week - 1);
+      return;
+    }
+    goTo(state.beat - 1);
+  }
+
+  /* One week of the rollout. Stepping a week is a smaller move than changing
+     beat, so it gets the shorter transition and it does not disturb the beat's
+     furniture. Arriving at the rollout from somewhere else is a beat change
+     first — otherwise clicking a week from the scoreboard would leave the
+     decision card down, and the rollout is that card's story. */
+  function goToWeek(week) {
+    if (state.beat !== ROLLOUT_BEAT) goTo(ROLLOUT_BEAT);
+    state.week = Math.max(1, Math.min(WEEKS, week));
+    state.everAdvanced = true;
+    clearTimers();
+    motion = WEEK_MOTION;
+    render();
+    motion = BEAT_MOTION;
+  }
+
   function goTo(beat) {
     beat = Math.max(0, Math.min(FREE, beat));
+    motion = BEAT_MOTION;
     var previous = state.beat;
     if (beat !== 0) state.everAdvanced = true;
     clearTimers();
     pulses.length = 0;
     state.beat = beat;
 
-    if (beat < 7) state.week = 1;
-    if (beat === 8) state.week = WEEKS;
-    if (beat === FREE && previous === 8) state.week = WEEKS;
+    /* The rollout is entered at its first week going forwards and at its
+       last week coming back, so stepping into beat seven from either side
+       lands on the week the presenter just left. */
+    if (beat < ROLLOUT_BEAT) state.week = 1;
+    if (beat === ROLLOUT_BEAT) state.week = previous > ROLLOUT_BEAT ? WEEKS : 1;
+    if (beat > ROLLOUT_BEAT) state.week = WEEKS;
 
     // The decision card opens on the hottest call site at beat six and stays
     // open through the rollout, because the rollout is that card's story. Beat
@@ -1560,8 +1838,6 @@
       completeTrajectory();
     }
 
-    if (beat === 7) runScrubber();
-
     // Fade the caption line so a beat change reads as a change.
     var caption = document.getElementById('caption');
     caption.classList.add('swap');
@@ -1575,10 +1851,10 @@
   window.addEventListener('keydown', function (event) {
     if (event.key === 'ArrowRight' || event.key === ' ' || event.key === 'PageDown') {
       event.preventDefault();
-      goTo(state.beat + 1);
+      advance();
     } else if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
       event.preventDefault();
-      goTo(state.beat - 1);
+      retreat();
     } else if (event.key === 'Escape') {
       state.cardOpen = false;
       render();
@@ -1596,7 +1872,7 @@
 
   document.getElementById('stage').addEventListener('click', function (event) {
     if (event.target.closest && event.target.closest(INTERACTIVE)) return;
-    goTo(state.beat + 1);
+    advance();
   });
 
   // --------------------------------------------------------- free explore

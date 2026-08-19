@@ -128,6 +128,7 @@ check('filter chips rendered', () => {
 
 // ------------------------------------------------------------------ beats
 const key = (k) => window.dispatchEvent(new window.KeyboardEvent('keydown', { key: k, bubbles: true }));
+const click = (el) => el.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 const forward = () => key('ArrowRight');
 const back = () => key('ArrowLeft');
 
@@ -153,13 +154,18 @@ check('beat 2 reveals every call site and the counter reads forty seven', () => 
 });
 
 forward();
-check('beat 3 dims the cold nodes and lights four', () => {
-  const ops = $$('#layer-nodes > g').map((g) => +(g.getAttribute('opacity') || 1));
-  const hot = ops.filter((o) => o > 0.9).length;
-  const cold = ops.filter((o) => o <= 0.2).length;
-  if (hot !== 4) throw new Error(hot + ' hot nodes, expected 4');
-  if (cold !== 15) throw new Error(cold + ' dimmed, expected 15');
-  return hot + ' hot at full, ' + cold + ' dimmed to 0.12';
+check('beat 3 drops the cold nodes to the floor and lights four', () => {
+  // Not to nothing. The claim is that four call sites out of nineteen hold
+  // the money, and the audience cannot see that unless the other fifteen are
+  // still on the screen to be counted.
+  const tiers = $$('#layer-nodes > g').map((g) => g.getAttribute('data-tier'));
+  const live = tiers.filter((t) => t === 'live').length;
+  const floor = tiers.filter((t) => t === 'floor').length;
+  if (live !== 4) throw new Error(live + ' live nodes, expected 4');
+  if (floor !== 15) throw new Error(floor + ' at the floor, expected 15');
+  const faded = $$('#layer-nodes > g').filter((g) => +(g.getAttribute('opacity') || 1) < 1);
+  if (faded.length) throw new Error(faded.length + ' nodes faded below full opacity');
+  return live + ' live, ' + floor + ' at the visibility floor, none faded out';
 });
 
 check('beat 3 panel reports the concentration', () => {
@@ -244,10 +250,100 @@ check('beat 6 card shows both a failing and a passing gate', () => {
 });
 
 forward();
-check('beat 7 shows the scrubber at week one', () => {
+check('beat 7 lands on week one', () => {
   if (!on('scrubber')) throw new Error('scrubber not on');
   if ($('#scrub-week').textContent !== '1') throw new Error('starts at week ' + $('#scrub-week').textContent);
   return $('#scrub-dates').textContent + ' · ' + $('#scrub-spend').textContent.replace(/<[^>]+>/g, '');
+});
+
+const beatNumber = () => $('#caption-beat').textContent.replace('Beat ', 'B').replace(/ —.*/, '');
+const weekNow = () => $('#scrub-week').textContent;
+
+check('beat 7 steps one week per press and stays on the beat until week eight', () => {
+  const seen = [];
+  for (let i = 0; i < 7; i += 1) {
+    forward();
+    seen.push(beatNumber() + ' week ' + weekNow());
+  }
+  const wandered = seen.filter((s) => !s.startsWith('B7 '));
+  if (wandered.length) throw new Error('left the beat: ' + wandered.join(', '));
+  const weeks = seen.map((s) => +s.split('week ')[1]);
+  if (weeks.join(',') !== '2,3,4,5,6,7,8') throw new Error('weeks ' + weeks.join(','));
+  forward();
+  if (beatNumber() !== 'B8') throw new Error('week eight did not hand on: ' + beatNumber());
+  back();
+  if (beatNumber() !== 'B7' || weekNow() !== '8') {
+    throw new Error('coming back landed on ' + beatNumber() + ' week ' + weekNow());
+  }
+  return 'seven presses walk weeks ' + weeks.join(' → ') +
+    '; the eighth reaches beat 8, and coming back lands on week eight';
+});
+
+check('beat 7 steps back one week at a time and only week one hands back', () => {
+  const seen = [];
+  for (let i = 0; i < 7; i += 1) {
+    back();
+    seen.push(beatNumber() + ' week ' + weekNow());
+  }
+  const weeks = seen.map((s) => +s.split('week ')[1]);
+  if (weeks.join(',') !== '7,6,5,4,3,2,1') throw new Error('weeks ' + weeks.join(','));
+  back();
+  if (beatNumber() !== 'B6') throw new Error('week one did not hand back: ' + beatNumber());
+  forward();
+  if (beatNumber() !== 'B7' || weekNow() !== '1') {
+    throw new Error('re-entry landed on ' + beatNumber() + ' week ' + weekNow());
+  }
+  return 'weeks ' + weeks.join(' → ') + ', then beat 6, then back in at week one';
+});
+
+check('the control bar unrolls the rollout dot into a segmented week pill', () => {
+  const pill = $('#week-pill');
+  if (!pill) throw new Error('no week pill');
+  if (!pill.classList.contains('on')) throw new Error('the pill is not showing at beat 7');
+  const segments = $$('#week-pill .week-seg');
+  if (segments.length !== 8) throw new Error(segments.length + ' segments');
+  const dots = $$('#beat-dots .beat-dot');
+  if (!dots[7].classList.contains('folded')) throw new Error('the beat 7 dot is still a dot');
+  const walked = [];
+  for (let week = 1; week <= 8; week += 1) {
+    click(segments[week - 1]);
+    const lit = segments.filter((s) => s.classList.contains('on')).map((s) => s.textContent);
+    const past = segments.filter((s) => s.classList.contains('past')).length;
+    if (lit.length !== 1 || lit[0] !== String(week)) throw new Error('week ' + week + ' lit ' + lit.join(','));
+    if (past !== week - 1) throw new Error('week ' + week + ' filled ' + past + ' segments behind it');
+    if ($('#scrub-week').textContent !== String(week)) throw new Error('the scrubber did not follow to week ' + week);
+    walked.push(week);
+  }
+  click(segments[0]);
+  return 'eight clickable segments, ' + walked.join('') + ', scrubber and pill in step';
+});
+
+check('every rollout week says in one line what it did', () => {
+  const segments = $$('#week-pill .week-seg');
+  const lines = [];
+  for (let week = 1; week <= 8; week += 1) {
+    click(segments[week - 1]);
+    const chip = $('#week-event');
+    if (!chip.classList.contains('on')) throw new Error('no week line at week ' + week);
+    const text = chip.textContent.replace(/\s+/g, ' ').trim();
+    if (!text.startsWith('Week ' + week + ' of 8')) throw new Error('week ' + week + ' reads: ' + text);
+    if (text.length < 40) throw new Error('week ' + week + ' says almost nothing: ' + text);
+    lines.push(text);
+  }
+  const moves = lines.filter((l) => /→/.test(l)).length;
+  const quiet = lines.filter((l) => /no status moves|nothing is under an instrument/.test(l)).length;
+  if (moves + quiet !== 8) throw new Error('a week said neither what moved nor what is being watched');
+  if (!moves || !quiet) throw new Error(moves + ' weeks with a move, ' + quiet + ' quiet');
+  click(segments[0]);
+  return moves + ' weeks name a status change, ' + quiet + ' name what is being watched — e.g. ' +
+    JSON.stringify(lines[3]);
+});
+
+check('the week line is beat seven\'s alone', () => {
+  back();                                     // into beat 6
+  if ($('#week-event').classList.contains('on')) throw new Error('the week line leaked into beat 6');
+  forward();
+  if (!$('#week-event').classList.contains('on')) throw new Error('the week line did not come back');
 });
 
 const spendByWeek = [];
@@ -336,13 +432,19 @@ check('advancing past the last beat is a no-op', () => {
 });
 
 // -------------------------------------------------------------- reversing
-check('every beat reverses', () => {
+check('every beat reverses, and the rollout reverses a week at a time', () => {
+  // Nine beats and eight rollout weeks, so sixteen presses from free explore
+  // back to the cold open: one per beat, plus the seven extra inside beat
+  // seven that step the weeks back down.
   const seen = [];
-  for (let i = 0; i < 9; i += 1) {
+  let presses = 0;
+  while (!/Beat 0/.test($('#caption-beat').textContent) && presses < 40) {
     back();
-    seen.push($('#caption-beat').textContent.replace('Beat ', 'B').replace(/ —.*/, ''));
+    presses += 1;
+    seen.push($('#caption-beat').textContent.replace('Beat ', 'B').replace(/ —.*/, '') +
+      (/Beat 7/.test($('#caption-beat').textContent) ? 'w' + $('#scrub-week').textContent : ''));
   }
-  if (seen[8] !== 'B0') throw new Error(seen.join(' '));
+  if (presses !== 16) throw new Error(presses + ' presses: ' + seen.join(' '));
   if (errors.length) throw new Error(errors.join(' | '));
   return seen.join(' → ');
 });
@@ -355,7 +457,7 @@ check('reversing to beat 0 resets the cold open and hides everything else', () =
 });
 
 check('forward again from zero reaches beat 8 with the same scoreboard', () => {
-  for (let i = 0; i < 8; i += 1) forward();
+  for (let i = 0; i < 15; i += 1) forward();      // eight beats and seven weeks
   const tiles = $$('#scoreboard .tile .tile-count').map((t) => t.textContent).join(',');
   if (tiles !== '1,1,1,16') throw new Error(tiles);
   return 'tiles ' + tiles;
@@ -364,7 +466,6 @@ check('forward again from zero reaches beat 8 with the same scoreboard', () => {
 // ------------------------------------------------------------- navigation
 // Three ways in, and all three have to reach the same nine beats: the control
 // bar, the keyboard, and a click anywhere on the canvas.
-const click = (el) => el.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 const beatNow = () => $('#caption-beat').textContent;
 
 check('the control bar shows a dot for every beat plus the explore pill', () => {
@@ -380,7 +481,16 @@ check('every beat is reachable by clicking its dot', () => {
   $$('#beat-dots .beat-dot').forEach((dot, i) => {
     click(dot);
     const lit = $$('#beat-dots .beat-dot').filter((d) => d.classList.contains('on'));
-    if (lit.length !== 1 || lit[0] !== dot) throw new Error('dot ' + i + ' did not light alone');
+    if (i === 7) {
+      // The rollout dot does not light. It unrolls into the week pill, which
+      // is standing in its place in the row.
+      if (lit.length) throw new Error('a dot lit while the week pill was out');
+      if (!$('#week-pill').classList.contains('on')) throw new Error('the week pill did not unroll');
+      if (!dot.classList.contains('folded')) throw new Error('the rollout dot is still a dot');
+    } else {
+      if (lit.length !== 1 || lit[0] !== dot) throw new Error('dot ' + i + ' did not light alone');
+      if ($('#week-pill').classList.contains('on')) throw new Error('the week pill is out at beat ' + i);
+    }
     seen.push(beatNow().replace('Beat ', 'B').replace(/ —.*/, ''));
     cameraReport();
   });

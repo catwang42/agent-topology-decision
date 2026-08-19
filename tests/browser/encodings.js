@@ -245,8 +245,71 @@ const datum = (el) => window.d3.select(el).datum();
     return { k, slack: worst, shown: visible.length };
   }
 
+  /* ------------------------------------------------------- the floor
+     A call site the audience cannot see is a call site that is not in the
+     argument. Every glyph carries a ring that clears three to one against the
+     background, at every beat and every rollout week — that is the contrast
+     ratio the accessibility guidelines ask of a graphical object, and it is
+     about what a two pixel ring needs to survive a projector at two metres.
+     The check works the ratio out from the attributes the page actually set,
+     compositing the stroke over the background at its own opacity. */
+  const SPACE = [0x0a, 0x0e, 0x17];
+  const MINIMUM_CONTRAST = 3;
+
+  const channel = (v) => {
+    const c = v / 255;
+    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  const luminance = (rgb) =>
+    0.2126 * channel(rgb[0]) + 0.7152 * channel(rgb[1]) + 0.0722 * channel(rgb[2]);
+  const parse = (colour) => {
+    const hex = colour.trim().match(/^#([0-9a-f]{6})$/i);
+    if (hex) {
+      const n = parseInt(hex[1], 16);
+      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    }
+    const rgb = colour.match(/rgba?\(([^)]+)\)/i);
+    if (!rgb) throw new Error('cannot read the colour ' + JSON.stringify(colour));
+    const parts = rgb[1].split(',').map((v) => parseFloat(v));
+    return [parts[0], parts[1], parts[2]];
+  };
+  const over = (rgb, alpha) => rgb.map((v, i) => alpha * v + (1 - alpha) * SPACE[i]);
+  const contrast = (colour, alpha) => {
+    const lit = luminance(over(parse(colour), alpha));
+    const back = luminance(SPACE);
+    return (Math.max(lit, back) + 0.05) / (Math.min(lit, back) + 0.05);
+  };
+
+  function faintestGlyph() {
+    const glyphs = $$('#layer-nodes > g');
+    if (glyphs.length !== 19) throw new Error(glyphs.length + ' glyphs in the layer');
+    let worst = { ratio: Infinity };
+    glyphs.forEach((g) => {
+      const body = g.querySelector('.node-body');
+      const label = g.querySelector('.node-label');
+      const groupOpacity = opacity(g);
+      if (groupOpacity < 1) {
+        throw new Error(datum(g).id + ' is faded to ' + groupOpacity.toFixed(2));
+      }
+      const alpha = +(body.getAttribute('stroke-opacity') ?? 1);
+      const width = +(body.getAttribute('stroke-width') ?? 1);
+      const ratio = contrast(body.getAttribute('stroke'), alpha);
+      if (width < 2) throw new Error(datum(g).id + ' has a ' + width + 'px ring');
+      if (+label.getAttribute('opacity') < 0.68) {
+        throw new Error(datum(g).id + ' label at ' + label.getAttribute('opacity'));
+      }
+      if (ratio < worst.ratio) worst = { ratio, id: datum(g).id, width };
+    });
+    if (worst.ratio < MINIMUM_CONTRAST) {
+      throw new Error(worst.id + ' rings at ' + worst.ratio.toFixed(2) +
+        ' to 1, under the ' + MINIMUM_CONTRAST + ' to 1 floor');
+    }
+    return worst;
+  }
+
   const dots = $$('#beat-dots .beat-dot');
   const tightest = [];
+  const faintest = [];
   for (let beat = 0; beat < dots.length; beat += 1) {
     dots[beat].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     await settle();
@@ -257,7 +320,56 @@ const datum = (el) => window.d3.select(el).datum();
       return r.shown + ' glyphs on screen, camera scale ' + r.k.toFixed(3) +
         ', clearance ' + r.slack.toFixed(1) + 'px';
     });
+    check('beat ' + beat + ': all nineteen call sites clear the visibility floor', () => {
+      const worst = faintestGlyph();
+      faintest.push(worst.ratio);
+      return 'nineteen rings on screen, faintest ' + worst.id + ' at ' +
+        worst.ratio.toFixed(2) + ' to 1 on a ' + worst.width + 'px stroke';
+    });
   }
+
+  // The rollout is eight separate pictures, so it gets checked eight times
+  // rather than once. The camera does not move between weeks, but which call
+  // sites are lit does, and a week that dropped one into the dark would be a
+  // week the audience could not count.
+  const weekSegments = $$('#week-pill .week-seg');
+  for (let week = 1; week <= 8; week += 1) {
+    weekSegments[week - 1].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await settle();
+    /* eslint-disable no-loop-func */
+    check('rollout week ' + week + ': the whole topology is still on screen', () => {
+      const worst = faintestGlyph();
+      faintest.push(worst.ratio);
+      const r = slackNow();
+      if (+$('#scrub-week').textContent !== week) throw new Error('the scrubber says week ' + $('#scrub-week').textContent);
+      return 'nineteen rings, faintest at ' + worst.ratio.toFixed(2) +
+        ' to 1, clearance ' + r.slack.toFixed(1) + 'px';
+    });
+  }
+
+  check('nothing anywhere in the story falls under the visibility floor', () => {
+    const worst = Math.min(...faintest);
+    return 'faintest ring across nine beats and eight rollout weeks: ' +
+      worst.toFixed(2) + ' to 1 against the background, floor is ' +
+      MINIMUM_CONTRAST + ' to 1';
+  });
+
+  // Beat seven is presenter paced. Landing on it must not start anything.
+  check('the rollout does not move on its own', async () => {});
+  dots[7].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  const landedOn = $('#scrub-week').textContent;
+  await settle();
+  await settle();
+  await settle();
+  results.pop();
+  check('the rollout does not move on its own', () => {
+    if (landedOn !== '1') throw new Error('landed on week ' + landedOn);
+    if ($('#scrub-week').textContent !== '1') {
+      throw new Error('drifted to week ' + $('#scrub-week').textContent + ' with no input');
+    }
+    if (+$('#scrub-range').value !== 1) throw new Error('the slider drifted to ' + $('#scrub-range').value);
+    return 'four and a bit seconds on beat seven with no key pressed: still week one';
+  });
 
   check('the graph never touches the caption or the controls', () => {
     if (!tightest.length) throw new Error('no beats were measured');

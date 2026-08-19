@@ -166,9 +166,13 @@ html, body {
   height: var(--band-controls-height);
   z-index: 75;
   display: grid;
-  grid-template-columns: 464px 1fr 452px;
+  /* Three columns, sized to what each side actually needs: the filter rows
+     are as wide as their longest team name, the rollout scrubber is as wide
+     as its date range, and what is left in the middle is enough for the beat
+     row with the week pill unrolled into it. */
+  grid-template-columns: 492px 1fr 412px;
   align-items: center;
-  gap: 18px;
+  gap: 16px;
   padding: 0 var(--gutter);
   background: rgba(8, 11, 19, 0.94);
   border-top: 1px solid var(--rule);
@@ -276,6 +280,12 @@ html, body {
 
 .node-hit { fill: transparent; cursor: pointer; }
 
+/* Two pixels means two pixels on the screen, not two pixels multiplied by
+   whatever the camera settled on. The floor ring exists so a quiet call site
+   can be seen from the back of the room; a ring that thins out every time the
+   camera pulls back is not a floor. */
+.node-body { vector-effect: non-scaling-stroke; }
+
 /* One easing per property. Fill, stroke, radius and the ring opacities are all
    animated from app.js on a beat change, so they are deliberately not
    transitioned here — two easings chasing the same value reads as lag. What
@@ -287,7 +297,9 @@ html, body {
   font-size: 10.5px;
   font-weight: 500;
   letter-spacing: 0.012em;
-  fill: var(--ink-dim);
+  /* Brighter than the general dim ink, because at the visibility floor this
+     is carried at seventy percent and still has to be read at two metres. */
+  fill: #A8B8CC;
   text-anchor: middle;
   pointer-events: none;
   transition: fill var(--slow) var(--ease);
@@ -343,12 +355,13 @@ html, body {
   position: absolute;
   inset: 0;
   z-index: 30;
-  /* High in the band. The camera puts the single call site low in the frame at
-     this beat, so the question and the thing it is asked about never overlap. */
+  /* A strip across the top of the band, sized to QUESTION_SPACE in app.js. The
+     whole topology is on screen at this beat, so the camera fits it into the
+     band underneath the question rather than sharing the pixels. */
   display: grid;
   justify-items: center;
   align-items: start;
-  padding-top: 62px;
+  padding-top: 8px;
   pointer-events: none;
   opacity: 0;
   transition: opacity var(--slow) var(--ease);
@@ -357,7 +370,7 @@ html, body {
 #coldopen.on { opacity: 1; }
 
 .question-frame {
-  padding: 30px 44px;
+  padding: 15px 40px 17px;
   border-left: 2px solid var(--cyan);
   background: linear-gradient(90deg, rgba(34, 211, 238, 0.09), transparent 78%);
   box-shadow: -14px 0 60px rgba(34, 211, 238, 0.1);
@@ -365,8 +378,8 @@ html, body {
 
 .question-label {
   display: block;
-  margin-bottom: 13px;
-  font-size: 11px;
+  margin-bottom: 7px;
+  font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.22em;
   text-transform: uppercase;
@@ -374,7 +387,7 @@ html, body {
 }
 
 #typed-question {
-  font-size: 40px;
+  font-size: 33px;
   font-weight: 300;
   letter-spacing: -0.012em;
   color: var(--ink);
@@ -385,9 +398,9 @@ html, body {
 #caret {
   display: inline-block;
   width: 2px;
-  height: 38px;
+  height: 31px;
   margin-left: 4px;
-  vertical-align: -6px;
+  vertical-align: -5px;
   background: var(--cyan);
   box-shadow: 0 0 10px var(--cyan);
   animation: blink 1.05s steps(1) infinite;
@@ -519,7 +532,7 @@ html, body {
 .nav-arrow:disabled:hover { border-color: var(--rule-bright); color: var(--ink-dim);
                             background: rgba(20, 27, 45, 0.85); }
 
-#beat-dots { display: flex; align-items: center; gap: 7px; }
+#beat-dots { display: flex; align-items: center; gap: 4px; }
 
 .beat-dot {
   width: 13px;
@@ -540,6 +553,50 @@ html, body {
   border-color: var(--cyan-bright);
   box-shadow: 0 0 14px var(--cyan), 0 0 3px #fff inset;
   transform: scale(1.32);
+}
+
+/* The rollout dot, unrolled. It occupies the row position the dot was in, so
+   the presenter's eye does not have to go looking for where they are. */
+.beat-dot.folded { display: none; }
+
+#week-pill {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  height: 17px;
+  padding: 2px;
+  border: 1px solid var(--cyan);
+  border-radius: 999px;
+  background: rgba(34, 211, 238, 0.08);
+  box-shadow: 0 0 16px rgba(34, 211, 238, 0.22);
+}
+
+#week-pill.on { display: flex; }
+
+.week-seg {
+  width: 12px;
+  height: 13px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--ink-faint);
+  font-family: inherit;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: all 200ms var(--ease);
+}
+
+.week-seg:hover { background: rgba(34, 211, 238, 0.34); color: var(--ink); }
+.week-seg.past  { background: var(--cyan-deep); color: #BEE9F4; }
+
+.week-seg.on {
+  background: var(--cyan);
+  color: #04222B;
+  box-shadow: 0 0 12px var(--cyan);
 }
 
 .beat-pill {
@@ -593,9 +650,8 @@ html, body {
 /* The one affordance nobody finds on their own, so it pulses until it is used. */
 #begin-hint {
   position: absolute;
-  left: 50%;
-  top: 630px;
-  transform: translateX(-50%);
+  right: 44px;
+  top: 704px;
   z-index: 78;
   display: flex;
   align-items: center;
@@ -953,7 +1009,7 @@ html, body {
 
 #scrubber.on { opacity: 1; pointer-events: auto; }
 
-.scrub-head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 7px; }
+.scrub-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
 
 .scrub-title {
   font-size: 9.5px;
@@ -963,7 +1019,18 @@ html, body {
   color: var(--ink-faint);
 }
 
-#scrub-week { font-size: 16px; font-weight: 300; color: var(--ink); font-variant-numeric: tabular-nums; }
+/* Large, because at beat seven this is the one number the presenter is
+   stepping and the audience is following. */
+#scrub-week {
+  font-size: 23px;
+  font-weight: 300;
+  line-height: 1;
+  color: var(--cyan-bright);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 22px rgba(34, 211, 238, 0.45);
+}
+
+.scrub-of { font-size: 10.5px; color: var(--ink-faint); }
 .scrub-dates { font-size: 10.5px; color: var(--ink-faint); }
 
 #scrub-range {
@@ -1001,7 +1068,7 @@ html, body {
   cursor: grab;
 }
 
-.scrub-foot { margin-top: 6px; }
+.scrub-foot { margin-top: 4px; }
 
 .scrub-spend {
   font-size: 11px;
@@ -1114,7 +1181,8 @@ html, body {
 #caption { width: 100%; pointer-events: none; }
 
 #caption-line {
-  max-width: 1240px;
+  width: fit-content;
+  max-width: 1000px;
   font-size: 28px;
   font-weight: 300;
   line-height: 1.34;
@@ -1125,6 +1193,39 @@ html, body {
 }
 
 #caption.swap #caption-line { opacity: 0; }
+
+/* One sentence per press, on the beat's own surface. Beat seven takes eight
+   presses and each of them has to say what it just did. */
+#week-event {
+  display: none;
+  margin-top: 11px;
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+#week-event.on { display: block; }
+#week-event b { font-weight: 600; color: var(--ink); }
+
+.week-event-week {
+  display: inline-block;
+  margin-right: 11px;
+  padding: 3px 10px;
+  border: 1px solid rgba(34, 211, 238, 0.42);
+  border-radius: 999px;
+  background: rgba(34, 211, 238, 0.1);
+  color: var(--cyan-bright);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.week-event-sep { margin: 0 9px; color: var(--rule-bright); }
+#week-event .week-flat  { color: var(--ink-faint); }
+#week-event .delta-down { color: var(--migrated); font-weight: 600; }
+#week-event .delta-up   { color: var(--hold); font-weight: 600; }
 
 /* --------------------------------------------------------------- tooltip */
 

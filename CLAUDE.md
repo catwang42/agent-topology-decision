@@ -114,6 +114,15 @@ python3 -m pytest tests/
 - Every way to advance the story must look like a way to advance the story.
   The control bar is always on screen, the keys still work, and a click
   anywhere on the canvas steps forward. No invisible hotspots.
+- Every call site is on screen in every frame. A dormant glyph falls to a
+  floor, never below it: a two pixel ring that clears three to one against the
+  background, a faint interior, and its name at seventy percent. Heat and
+  dimming are a range above that floor, so beat three's die back drops the cold
+  call sites to it and no further. Nothing is drawn smaller than about thirty
+  pixels across at fit zoom, and no name may sit on a glyph.
+- The rollout is paced by the presenter, not by a timer. Beat seven takes eight
+  presses, one week each, forwards and backwards, and nothing in it moves
+  without an input. There is no auto-play anywhere on the page.
 
 Both the band tiling and the palette are enforced: see `tests/test_layout.py`.
 The page itself is checked in `tests/browser/`.

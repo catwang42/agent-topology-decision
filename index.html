@@ -114,6 +114,9 @@
   <div id="band-caption">
     <div id="caption">
       <div id="caption-line"></div>
+      <!-- Beat seven only: what this rollout week did, on its own line under
+           the beat's line, so the presenter has one sentence per press. -->
+      <div id="week-event" aria-live="polite"></div>
     </div>
   </div>
 
@@ -149,10 +152,11 @@
       <div class="scrub-head">
         <span class="scrub-title">Rollout week</span>
         <span id="scrub-week">1</span>
+        <span class="scrub-of">of 8</span>
         <span class="scrub-dates" id="scrub-dates"></span>
       </div>
       <input type="range" id="scrub-range" min="1" max="8" step="1" value="1"
-             title="Drag to move through the eight week rollout">
+             title="Drag through the rollout, or press the right arrow key one week at a time">
       <div class="scrub-foot">
         <div class="scrub-spend" id="scrub-spend"></div>
       </div>

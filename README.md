@@ -36,6 +36,13 @@ clickable without looking clickable.
 Every beat is a pure function of the beat number, so you can walk it backwards
 mid-presentation without anything getting stuck.
 
+Beat seven is the exception, and only in that it takes eight presses instead of
+one. It is the eight week rollout, and it steps one week per press so the
+presenter can talk over each one. Nothing in it moves on its own. The beat's
+dot in the control bar unrolls into a segmented pill, one segment per week,
+that fills as you go — so you always know how many presses are left before the
+story moves on.
+
 | Beat | What happens | The line |
 | --- | --- | --- |
 | 0 | A question types itself; one node pulses | A customer asks one question. |
@@ -45,7 +52,7 @@ mid-presentation without anything getting stuck.
 | 4 | A glowing core opens inside each glyph: billed reasoning share | Part of this heat isn't work — it's default settings. |
 | 5 | Behaviour class borders draw on; readiness badges appear | The instrument matches the behavior — and we refuse verdicts where we didn't measure. |
 | 6 | The decision card slides in on the hottest call site | Three numbers and a contract. That's what "safe to move" looks like. |
-| 7 | The scrubber drags across eight weeks of rollout | One call site at a time. Never big-bang. Watch the bill. |
+| 7 | Eight presses, one rollout week each; a line per week says what moved | One call site at a time. Never big-bang. Watch the bill. |
 | 8 | Zoom out to the scoreboard | The biggest prize did not clear. That is the contract working, not the contract failing. |
 
 After beat eight the page enters free explore: pan, zoom, hover any call site
@@ -125,6 +132,19 @@ the camera refits with six percent of padding on every beat change, and the
 band clips anything the camera gets wrong. Overlays slide over the canvas as
 glass cards and the camera pans out from under them rather than fighting for
 the pixels.
+
+**The floor.** Every one of the nineteen call sites is drawn in every frame of
+the story, and none of them is ever allowed to disappear. A dormant call site
+still carries a two pixel ring in cool slate, a faint interior, and its name at
+seventy percent — enough to clear three to one against the background, which is
+the contrast an object needs to be seen rather than guessed at. Heat and
+dimming work as a range above that floor rather than a fade towards nothing:
+beat three drops the fifteen cold call sites *to* the floor, which is what lets
+the room count them and see that four of nineteen hold the money. Before spend
+ignites, beats zero to two hold every glyph a step above the floor, so the
+topology reads as a real system from the first frame. `tests/browser/` checks
+the contrast ratio of every ring in every beat and every rollout week, and the
+minimum glyph diameter, at both screen sizes.
 
 **The palette.** Deep space: background `#0A0E17`, a cyan accent for flow and
 activity, dormant call sites at `#1E293B` and near invisible. Spend reads as
