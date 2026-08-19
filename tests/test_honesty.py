@@ -14,6 +14,7 @@ observation of a real system.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -150,3 +151,58 @@ def test_claude_md_carries_the_three_rules():
     assert "Every number in this repository is synthetic and labelled as such." in text
     assert "No number may imply measurement, period." in text
     assert "abbreviation" in text.lower()
+
+
+def test_no_card_prose_describes_a_number_as_measured():
+    """The rule bites hardest on the decision cards, because they carry figures.
+
+    "Latency, ninety fifth percentile — 7,400 ms, incumbent measured at 6,900 ms"
+    reads as a report of what somebody ran. Nobody ran anything. The prose that
+    sits beside a figure has to say where the figure came from, and the only
+    honest answer in this repository is: it was invented.
+
+    Statements of method are still welcome, and the exclusion below is what
+    keeps them welcome — "the page renders measured values" describes what
+    would happen on the day real values attach, and reports no finding.
+    """
+    payload = json.loads((DATA / "decision_cards.json").read_text(encoding="utf-8"))
+
+    # Whole words only, which is what lets "unmeasured by design" and "pay for
+    # the measurement" through. Those say a thing was not measured, or that
+    # measuring costs money. Neither hands the reader a figure.
+    banned = re.compile(r"\b(measured|observed|recorded|benchmarked|reported)\b", re.I)
+
+    def prose_beside_a_figure(card: dict):
+        for metric in card.get("headline", []):
+            yield metric.get("basis", "")
+        yield card.get("verdict_line", "")
+        yield card.get("why", "")
+        yield card.get("next", "")
+
+    offenders = []
+    everything = dict(payload["cards"])
+    everything["unmeasured_card"] = payload["unmeasured_card"]
+    for call_site, card in everything.items():
+        for line in prose_beside_a_figure(card):
+            hit = banned.search(line or "")
+            if hit:
+                offenders.append(f"{call_site}: {line!r} says {hit.group(0)!r}")
+
+    assert not offenders, "a figure is presented as an observation:\n  " + "\n  ".join(offenders)
+
+
+def test_the_browser_bundle_carries_the_same_card_prose_as_the_source():
+    """The page reads the bundle, not the source, so the two must agree.
+
+    Editing a card and forgetting to run scripts/aggregate.py leaves the fixed
+    wording in the repository and the old wording on the screen, which is the
+    worst of both: the rule looks kept and is not.
+    """
+    bundle = DATA / "demo_data.js"
+    if not bundle.exists():
+        pytest.skip("run scripts/aggregate.py first")
+    source = json.loads((DATA / "decision_cards.json").read_text(encoding="utf-8"))
+    text = bundle.read_text(encoding="utf-8")
+    line = next(l for l in text.splitlines() if l.startswith("window.DEMO_CARDS ="))
+    baked = json.loads(line[len("window.DEMO_CARDS = "):].rstrip(";"))
+    assert baked == source, "data/demo_data.js is stale: run scripts/aggregate.py"

@@ -11,120 +11,171 @@
 <div id="scaler">
 <div id="stage">
 
-  <!-- Honesty chrome, always on screen. -->
-  <div id="badge" title="Nothing on this screen was measured.">
-    <span class="badge-dot"></span>ILLUSTRATIVE DEMO — synthetic traces
-  </div>
-
-  <header id="masthead">
-    <h1>The Decision Layer</h1>
-    <p class="sub">Enterprise customer support agent — thirty day traffic profile</p>
+  <!-- Band one: the header. Title on the left, honesty badge on the right.
+       Nothing else is ever allowed into this band. -->
+  <header id="band-header">
+    <div id="masthead">
+      <h1>The Decision Layer</h1>
+      <p class="sub">Enterprise customer support agent — thirty day traffic profile</p>
+    </div>
+    <div id="badge" title="Nothing on this screen was measured.">
+      <span class="badge-dot"></span>ILLUSTRATIVE DEMO — synthetic traces
+    </div>
   </header>
 
-  <!-- Beat zero: the question types itself. -->
-  <div id="coldopen">
-    <div class="question-frame">
-      <span class="question-label">Customer</span>
-      <div id="typed-question"><span id="typed-text"></span><span id="caret"></span></div>
+  <!-- Band two: the canvas. Everything the graph draws is clipped to this
+       rectangle, and the camera refits to it on every beat transition, so
+       no node can ever reach the caption or the controls. -->
+  <div id="band-canvas">
+
+    <canvas id="particles"></canvas>
+
+    <svg id="graph" viewBox="0 0 1440 600" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <radialGradient id="glow-cyan">
+          <stop offset="0%"   stop-color="#22D3EE" stop-opacity="0.62"></stop>
+          <stop offset="52%"  stop-color="#22D3EE" stop-opacity="0.16"></stop>
+          <stop offset="100%" stop-color="#22D3EE" stop-opacity="0"></stop>
+        </radialGradient>
+        <radialGradient id="glow-violet">
+          <stop offset="0%"   stop-color="#8B5CF6" stop-opacity="0.64"></stop>
+          <stop offset="52%"  stop-color="#8B5CF6" stop-opacity="0.17"></stop>
+          <stop offset="100%" stop-color="#8B5CF6" stop-opacity="0"></stop>
+        </radialGradient>
+        <radialGradient id="glow-magenta">
+          <stop offset="0%"   stop-color="#EC4899" stop-opacity="0.66"></stop>
+          <stop offset="52%"  stop-color="#EC4899" stop-opacity="0.18"></stop>
+          <stop offset="100%" stop-color="#EC4899" stop-opacity="0"></stop>
+        </radialGradient>
+        <radialGradient id="glow-emerald">
+          <stop offset="0%"   stop-color="#10B981" stop-opacity="0.5"></stop>
+          <stop offset="52%"  stop-color="#10B981" stop-opacity="0.13"></stop>
+          <stop offset="100%" stop-color="#10B981" stop-opacity="0"></stop>
+        </radialGradient>
+        <radialGradient id="glow-amber">
+          <stop offset="0%"   stop-color="#F59E0B" stop-opacity="0.55"></stop>
+          <stop offset="52%"  stop-color="#F59E0B" stop-opacity="0.15"></stop>
+          <stop offset="100%" stop-color="#F59E0B" stop-opacity="0"></stop>
+        </radialGradient>
+      </defs>
+      <g id="viewport">
+        <g id="layer-edges"></g>
+        <g id="layer-glow"></g>
+        <g id="layer-nodes"></g>
+      </g>
+    </svg>
+
+    <!-- Beat zero: the question types itself. -->
+    <div id="coldopen">
+      <div class="question-frame">
+        <span class="question-label">Customer</span>
+        <div id="typed-question"><span id="typed-text"></span><span id="caret"></span></div>
+      </div>
+    </div>
+
+    <!-- Beat one: the call counter. -->
+    <div id="counter">
+      <div id="counter-value">0</div>
+      <div id="counter-label">model calls in this one trajectory</div>
+    </div>
+
+    <!-- Beat three onward: spend concentration, as an overlay card. The graph
+         dims and blurs behind it rather than fighting it for the same pixels. -->
+    <aside id="panel">
+      <div class="panel-head">
+        <h2>Where the money is</h2>
+        <p id="panel-sub">Thirty day window</p>
+      </div>
+      <div id="concentration"></div>
+      <div id="spend-bars"></div>
+      <div class="panel-foot" id="panel-foot"></div>
+    </aside>
+
+    <!-- Beat six: the decision card, the same kind of overlay. -->
+    <aside id="card" aria-hidden="true">
+      <button id="card-close" title="Close this card">×</button>
+      <div id="card-body"></div>
+    </aside>
+
+    <!-- Beat eight: the scoreboard, confined to the canvas band. -->
+    <div id="scoreboard" aria-hidden="true">
+      <h2>Eight weeks in</h2>
+      <div id="scoreboard-tiles"></div>
+      <p id="scoreboard-line">
+        The map finds the money. The instruments end the debate. The contract makes it safe.
+        That's the decision layer.
+      </p>
+      <div id="scoreboard-links"></div>
+    </div>
+
+  </div>
+
+  <!-- Band three: the caption. Its own surface, never overlapped by anything. -->
+  <div id="band-caption">
+    <div id="caption">
+      <div id="caption-line"></div>
     </div>
   </div>
 
-  <!-- Beat one: the call counter. -->
-  <div id="counter">
-    <div id="counter-value">0</div>
-    <div id="counter-label">model calls in this one trajectory</div>
-  </div>
+  <!-- Band four: the controls. Filters on the left, beat navigation in the
+       middle, the rollout scrubber on the right. All of it always visible,
+       all of it obviously clickable. -->
+  <div id="band-controls">
 
-  <svg id="graph" viewBox="0 0 1000 760" preserveAspectRatio="xMidYMid meet">
-    <defs>
-      <pattern id="reasoning-stripe" width="6" height="6" patternUnits="userSpaceOnUse"
-               patternTransform="rotate(45)">
-        <rect width="6" height="6" fill="none"></rect>
-        <rect width="2.4" height="6" fill="#FFD9B0" opacity="0.85"></rect>
-      </pattern>
-      <radialGradient id="hot-glow">
-        <stop offset="0%" stop-color="#FF7A2F" stop-opacity="0.55"></stop>
-        <stop offset="60%" stop-color="#FF7A2F" stop-opacity="0.14"></stop>
-        <stop offset="100%" stop-color="#FF7A2F" stop-opacity="0"></stop>
-      </radialGradient>
-    </defs>
-    <g id="viewport">
-      <g id="layer-edges"></g>
-      <g id="layer-glow"></g>
-      <g id="layer-nodes"></g>
-      <g id="layer-flyer"></g>
-    </g>
-  </svg>
-
-  <!-- Corner filters. They really filter. -->
-  <div id="filters">
-    <div class="filter-row">
-      <span class="filter-label">Environment</span>
-      <div class="chips" id="filter-environment"></div>
+    <div id="filters">
+      <div class="filter-row">
+        <span class="filter-label">Environment</span>
+        <div class="chips" id="filter-environment"></div>
+      </div>
+      <div class="filter-row">
+        <span class="filter-label">Team</span>
+        <div class="chips" id="filter-team"></div>
+      </div>
     </div>
-    <div class="filter-row">
-      <span class="filter-label">Team</span>
-      <div class="chips" id="filter-team"></div>
+
+    <nav id="controls" aria-label="Beat navigation">
+      <div id="beat-title">
+        <span id="caption-beat"></span>
+        <span id="beat-count"></span>
+      </div>
+      <div id="beat-steps">
+        <button id="nav-prev" class="nav-arrow" title="Previous beat — left arrow">‹</button>
+        <div id="beat-dots" role="tablist"></div>
+        <button id="nav-next" class="nav-arrow" title="Next beat — right arrow, space, or click anywhere">›</button>
+      </div>
+    </nav>
+
+    <div id="scrubber">
+      <div class="scrub-head">
+        <span class="scrub-title">Rollout week</span>
+        <span id="scrub-week">1</span>
+        <span class="scrub-dates" id="scrub-dates"></span>
+      </div>
+      <input type="range" id="scrub-range" min="1" max="8" step="1" value="1"
+             title="Drag to move through the eight week rollout">
+      <div class="scrub-foot">
+        <div class="scrub-spend" id="scrub-spend"></div>
+      </div>
     </div>
+
   </div>
 
-  <!-- Side panel: spend concentration. -->
-  <aside id="panel">
-    <div class="panel-head">
-      <h2>Where the money is</h2>
-      <p id="panel-sub">Thirty day window</p>
-    </div>
-    <div id="concentration"></div>
-    <div id="spend-bars"></div>
-    <div class="panel-foot" id="panel-foot"></div>
-  </aside>
-
-  <!-- Beat six: the decision card. -->
-  <aside id="card" aria-hidden="true">
-    <button id="card-close" title="Close">×</button>
-    <div id="card-body"></div>
-  </aside>
-
-  <!-- Beat seven: the rollout scrubber. -->
-  <div id="scrubber">
-    <div class="scrub-head">
-      <span class="scrub-title">Rollout week</span>
-      <span id="scrub-week">1</span>
-      <span class="scrub-dates" id="scrub-dates"></span>
-      <span class="scrub-spend" id="scrub-spend"></span>
-    </div>
-    <input type="range" id="scrub-range" min="1" max="8" step="1" value="1">
-    <div class="scrub-ticks" id="scrub-ticks"></div>
-  </div>
-
-  <!-- Beat eight: the scoreboard. -->
-  <div id="scoreboard" aria-hidden="true">
-    <h2>Eight weeks in</h2>
-    <div id="scoreboard-tiles"></div>
-    <p id="scoreboard-line">
-      The map finds the money. The instruments end the debate. The contract makes it safe.
-      That's the decision layer.
-    </p>
-    <div id="scoreboard-links"></div>
-  </div>
-
-  <!-- The caption strip: the presenter's line, verbatim. -->
-  <div id="caption">
-    <div id="caption-beat"></div>
-    <div id="caption-line"></div>
-  </div>
-
-  <div id="hint">→ or space to advance · ← to go back</div>
-
-  <footer id="footer">
-    <span id="footer-provenance"></span>
-    <span class="footer-sep">·</span>
-    <span>generator <a href="scripts/gen_demo_traces.py">scripts/gen_demo_traces.py</a></span>
-    <span class="footer-sep">·</span>
-    <span>aggregator <a href="scripts/aggregate.py">scripts/aggregate.py</a></span>
-    <span class="footer-sep">·</span>
-    <span>rollout <a href="data/status_timeline.json">data/status_timeline.json</a></span>
+  <!-- Band five: provenance. Where these numbers came from, on every screen. -->
+  <footer id="band-footer">
+    <span id="footer" >
+      <span id="footer-provenance"></span>
+      <span class="footer-sep">·</span>
+      <span>generator <a href="scripts/gen_demo_traces.py">scripts/gen_demo_traces.py</a></span>
+      <span class="footer-sep">·</span>
+      <span>aggregator <a href="scripts/aggregate.py">scripts/aggregate.py</a></span>
+      <span class="footer-sep">·</span>
+      <span>rollout <a href="data/status_timeline.json">data/status_timeline.json</a></span>
+    </span>
+    <span id="hint">Click the canvas or press the right arrow key</span>
   </footer>
+
+  <!-- The one thing an audience never finds on its own. -->
+  <div id="begin-hint"><span class="begin-ring"></span>Click anywhere to begin</div>
 
   <div id="tooltip" aria-hidden="true"></div>
 

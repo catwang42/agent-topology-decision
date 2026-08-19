@@ -46,6 +46,10 @@ attach: `data/decision_cards.json`. Replace the card bodies, keep the keys, and
 the page renders them with no other change. On the day that happens, rule two
 changes with it, in this file first.
 
+Editing that file is two steps, not one. The page reads the browser bundle,
+`data/demo_data.js`, so a card edited in the source and not carried through by
+`scripts/aggregate.py` is an edit nobody sees. A test compares the two.
+
 Tests enforce what can be enforced: see `tests/test_honesty.py`.
 
 ## Rule three — plain language, no abbreviations
@@ -94,6 +98,22 @@ python3 -m pytest tests/
   with D3 version seven.
 - The page must open from a file path with no server and no network. That is
   why the data arrives as a script that assigns globals rather than as a fetch,
-  and why D3 is vendored into `lib/`.
+  and why both D3 and the typeface are vendored into `lib/`.
 - The stage is a fixed 1440 by 900 canvas, scaled to fit the screen it lands
-  on. Design for the projector, degrade to the laptop.
+  on by one uniform factor. Design for the projector, degrade to the laptop.
+- The stage is five bands that never overlap — header, canvas, caption,
+  controls, footer — and every band's position and height is a custom property
+  in `style.css` so the tiling can be checked by arithmetic. Nothing is drawn
+  outside a band. The graph lives in the canvas band and the camera refits it
+  there on every beat change; overlays sit over the canvas and the camera pans
+  out from under them.
+- Spend reads as colour temperature on one ramp, cyan to violet to magenta.
+  Amber is spent on exactly one meaning: a call site whose gates did not clear.
+  That reads as a warning without a legend only while there is no other amber
+  and no orange at all, so there is neither.
+- Every way to advance the story must look like a way to advance the story.
+  The control bar is always on screen, the keys still work, and a click
+  anywhere on the canvas steps forward. No invisible hotspots.
+
+Both the band tiling and the palette are enforced: see `tests/test_layout.py`.
+The page itself is checked in `tests/browser/`.

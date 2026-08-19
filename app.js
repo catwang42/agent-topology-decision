@@ -5,9 +5,16 @@
  * scripts/aggregate.py. Nothing here is measured. There is no measured value
  * anywhere in this repository, so there is no second label to keep straight.
  *
- * Nine beats, advanced with the right arrow, space, or a click, reversed with
- * the left arrow. Every beat is a pure function of the beat number, so going
- * backwards is the same code path as going forwards.
+ * Nine beats plus free explore. Advance with the right arrow, the space bar,
+ * the arrow button, a beat dot, or a click anywhere on the canvas; reverse
+ * with the left arrow or the back button. Every beat is a pure function of the
+ * beat number, so going backwards is the same code path as going forwards.
+ *
+ * Two renderers share one camera. The graph is drawn with scalable vector
+ * graphics because it is a small number of precise glyphs; the traffic flowing
+ * along its edges is drawn on a raw canvas underneath, because that is
+ * hundreds of moving particles and one draw call per frame beats hundreds of
+ * document nodes.
  */
 
 (function () {
@@ -50,9 +57,24 @@
 
   var LAST_BEAT = BEATS.length - 1;
   var FREE = LAST_BEAT;
+  var NUMBERED_BEATS = FREE;                 // beats zero through eight
 
-  var WIDTH = 1000;
-  var HEIGHT = 760;
+  /* The canvas band, in stage pixels. These mirror --band-canvas-height in
+     style.css; tests/test_layout.py asserts the two agree, so the grid has one
+     source of truth even though it is spelled twice. */
+  var CANVAS_W = 1440;
+  var CANVAS_H = readBandHeight() || 600;
+  var FIT_PADDING = 0.06;                    // six percent, per the layout grid
+  var PANEL_SPACE = 424;                     // width the spend panel takes back
+  var CARD_SPACE = 724;                      // width the decision card takes back
+
+  function readBandHeight() {
+    if (!window.getComputedStyle) return 0;
+    var raw = window.getComputedStyle(document.documentElement)
+      .getPropertyValue('--band-canvas-height');
+    return parseFloat(raw) || 0;
+  }
+
   var WEEKS = TIMELINE.weeks.length;
 
   var state = {
@@ -61,11 +83,16 @@
     environment: 'all',
     team: 'all',
     selected: null,
-    cardOpen: false
+    cardOpen: false,
+    everAdvanced: false
   };
 
   var timers = [];
   var stageScale = 1;
+  var hoverNode = null;
+
+  var REDUCED = !!(window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
   function clearTimers() {
     timers.forEach(clearTimeout);
@@ -90,6 +117,45 @@
     return fmtInt(value);
   }
 
+  // ------------------------------------------------------------- the palette
+
+  /* Spend intensity is colour temperature along one ramp. Cyan is the coolest
+     thing still running; magenta is where the money is. Nothing in this ramp
+     is orange, so the single amber ring that appears at beat seven reads as an
+     exception rather than as more of the same. */
+  var HEAT_RAMP = d3.scaleLinear()
+    .domain([0, 0.5, 1])
+    .range(['#22D3EE', '#8B5CF6', '#EC4899'])
+    .interpolate(d3.interpolateHcl)
+    .clamp(true);
+
+  var CYAN = '#22D3EE';
+  var SPACE = '#0A0E17';
+  var SURFACE = '#0F1524';
+  var DORMANT = '#1E293B';
+
+  var STATUS_COLOR = {
+    unmeasured: '#334155',
+    measured: '#38BDF8',
+    shadow: '#8B5CF6',
+    canary: '#EC4899',
+    migrated: '#10B981',
+    hold: '#F59E0B'      // the only amber on the page
+  };
+
+  function glowGradient(color) {
+    if (color === STATUS_COLOR.migrated) return 'url(#glow-emerald)';
+    if (color === STATUS_COLOR.hold) return 'url(#glow-amber)';
+    var hue = d3.hsl(color).h;
+    if (hue > 240 && hue < 320) return 'url(#glow-violet)';
+    if (hue >= 320 || hue < 40) return 'url(#glow-magenta)';
+    return 'url(#glow-cyan)';
+  }
+
+  function mix(base, accent, amount) {
+    return d3.interpolateRgb(base, accent)(amount);
+  }
+
   // ------------------------------------------------------------------ model
 
   var nodes = GRAPH.nodes.map(function (node) { return Object.assign({}, node); });
@@ -106,9 +172,36 @@
 
   var radius = d3.scaleSqrt()
     .domain([0, d3.max(nodes, function (n) { return n.calls; })])
-    .range([12, 41]);
+    .range([11, 28]);
 
-  nodes.forEach(function (node) { node.r = radius(node.calls); });
+  /* Call site names are written out in full, per rule three, and written out
+     in full they are wide enough to collide with each other on one line. So
+     they wrap onto two balanced lines, and the layout is told how wide each
+     one ended up so it can leave room. */
+  var CHARACTER_WIDTH = 5.55;   // Inter at 10.5 pixels, near enough for spacing
+
+  function wrapLabel(text) {
+    var words = text.split(' ');
+    if (words.length < 2 || text.length <= 16) return [text];
+    var best = null;
+    for (var i = 1; i < words.length; i += 1) {
+      var head = words.slice(0, i).join(' ');
+      var tail = words.slice(i).join(' ');
+      var imbalance = Math.abs(head.length - tail.length);
+      if (!best || imbalance < best.imbalance) {
+        best = { imbalance: imbalance, lines: [head, tail] };
+      }
+    }
+    return best.lines;
+  }
+
+  nodes.forEach(function (node) {
+    node.r = radius(node.calls);
+    node.labelLines = wrapLabel(node.label);
+    node.labelHalfWidth = d3.max(node.labelLines, function (line) {
+      return line.length;
+    }) * CHARACTER_WIDTH / 2;
+  });
 
   function statusOf(id, week) {
     var row = TIMELINE.timeline[id];
@@ -129,13 +222,12 @@
     'orchestration': 'Loops and re-entry. Least spend, most confounds — measure last.'
   };
 
-  var STATUS_COLOR = {
-    unmeasured: '#49525f',
-    measured: '#6fa8dc',
-    shadow: '#8b7fe8',
-    canary: '#e8c547',
-    migrated: '#35c4a8',
-    hold: '#e5534b'
+  // The outer ring says what kind of call site this is, taught at beat five.
+  var CLASS_STROKE = {
+    'transform': { dash: null, width: 1.5 },
+    'tool decider': { dash: '7 5', width: 1.7 },
+    'retrieval': { dash: '2 4', width: 1.9 },
+    'orchestration': { dash: '14 4 3 4', width: 2.3 }
   };
 
   /* One place computes every derived figure on screen, so the filters and the
@@ -204,53 +296,113 @@
 
   // ----------------------------------------------------------------- layout
 
-  function layerY(layer) { return 58 + layer * 108; }
+  var LAYER_GAP = 64;
 
   (function computeLayout() {
     var simulation = d3.forceSimulation(nodes)
-      .force('x', d3.forceX(WIDTH / 2).strength(0.09))
-      .force('y', d3.forceY(function (d) { return layerY(d.layer); }).strength(1.35))
-      .force('charge', d3.forceManyBody().strength(-820))
-      .force('collide', d3.forceCollide(function (d) { return d.r + 23; }).strength(0.92))
+      .force('x', d3.forceX(570).strength(0.085))
+      .force('y', d3.forceY(function (d) { return d.layer * LAYER_GAP; }).strength(1.4))
+      .force('charge', d3.forceManyBody().strength(-700))
+      // Wide enough for the glyph and for the name underneath it, whichever
+      // of the two needs more room.
+      .force('collide', d3.forceCollide(function (d) {
+        return Math.max(d.r + 20, d.labelHalfWidth + 11);
+      }).strength(0.94))
       .force('link', d3.forceLink(links).id(function (d) { return d.id; })
-        .distance(120).strength(0.045))
+        .distance(110).strength(0.045))
       .stop();
 
     for (var i = 0; i < 420; i += 1) simulation.tick();
 
-    // The margin has to clear the widest glow halo, not just the widest
-    // circle, or the hottest call site bleeds off the side of the stage.
-    var margin = d3.max(nodes, function (d) { return d.r; }) + 62;
+    // Absolute position does not matter — the camera fits whatever comes out
+    // of the simulation into the canvas band. The clamp only stops one stray
+    // node from stretching the bounding box and shrinking everything else.
     nodes.forEach(function (node) {
-      node.x = Math.max(margin, Math.min(WIDTH - margin, node.x));
-      node.y = layerY(node.layer);
+      node.x = Math.max(0, Math.min(1140, node.x));
+      node.y = node.layer * LAYER_GAP;
     });
   }());
 
-  function edgePath(link) {
+  /* How much room a glyph needs around its centre. The camera uses this, so
+     the widest halo and the label underneath are inside the frame by
+     construction rather than by luck. */
+  function extentTop(d)   { return d.r + 46; }
+  function extentBottom(d){ return d.r + 46; }
+  function extentSide(d)  { return Math.max(d.r + 46, d.labelHalfWidth + 8, 64); }
+
+  // -------------------------------------------------------- edge geometry
+
+  /* One curve, sampled once, used twice: the vector path the browser strokes
+     and the polyline the particle system walks. Sampling it here rather than
+     asking the document for the path length keeps the two exactly on top of
+     each other and keeps the particle loop free of layout reads. */
+  var SAMPLES = 34;
+
+  function buildGeometry(link) {
     var s = link.source;
     var t = link.target;
-    var sx = s.x;
-    var sy = s.y;
     var dx = t.x - s.x;
     var dy = t.y - s.y;
     var distance = Math.sqrt(dx * dx + dy * dy) || 1;
-    // Stop short of the target so the arrowhead is not buried under the node.
-    var trim = t.r + 10;
+    var trim = t.r + 9;
     var tx = t.x - (dx / distance) * trim;
     var ty = t.y - (dy / distance) * trim;
 
+    var points = [];
+    var d;
     if (t.layer > s.layer) {
-      var bend = (ty - sy) * 0.46;
-      return 'M' + sx + ',' + sy + ' C' + sx + ',' + (sy + bend) +
-             ' ' + tx + ',' + (ty - bend) + ' ' + tx + ',' + ty;
+      var bend = (ty - s.y) * 0.46;
+      var c1 = [s.x, s.y + bend];
+      var c2 = [tx, ty - bend];
+      d = 'M' + s.x + ',' + s.y + ' C' + c1[0] + ',' + c1[1] +
+          ' ' + c2[0] + ',' + c2[1] + ' ' + tx + ',' + ty;
+      for (var i = 0; i <= SAMPLES; i += 1) points.push(cubic(s.x, s.y, c1, c2, tx, ty, i / SAMPLES));
+    } else {
+      // A call back up the stack — the orchestrator being re-entered. Arc it
+      // wide so a loop reads as a loop rather than as a straight line.
+      var side = (s.x + tx) / 2 < 570 ? -1 : 1;
+      var mx = (s.x + tx) / 2 + side * 150;
+      var my = (s.y + ty) / 2;
+      d = 'M' + s.x + ',' + s.y + ' Q' + mx + ',' + my + ' ' + tx + ',' + ty;
+      for (var j = 0; j <= SAMPLES; j += 1) points.push(quad(s.x, s.y, mx, my, tx, ty, j / SAMPLES));
     }
-    // A call back up the stack — the orchestrator being re-entered. Arc it
-    // wide so a loop reads as a loop rather than as a straight line.
-    var side = (sx + tx) / 2 < WIDTH / 2 ? -1 : 1;
-    var mx = (sx + tx) / 2 + side * 165;
-    var my = (sy + ty) / 2;
-    return 'M' + sx + ',' + sy + ' Q' + mx + ',' + my + ' ' + tx + ',' + ty;
+
+    var cumulative = [0];
+    for (var k = 1; k < points.length; k += 1) {
+      var ax = points[k][0] - points[k - 1][0];
+      var ay = points[k][1] - points[k - 1][1];
+      cumulative.push(cumulative[k - 1] + Math.sqrt(ax * ax + ay * ay));
+    }
+    return { d: d, points: points, cumulative: cumulative,
+             length: cumulative[cumulative.length - 1] || 1 };
+  }
+
+  function cubic(x0, y0, c1, c2, x3, y3, u) {
+    var m = 1 - u;
+    var a = m * m * m, b = 3 * m * m * u, c = 3 * m * u * u, e = u * u * u;
+    return [a * x0 + b * c1[0] + c * c2[0] + e * x3,
+            a * y0 + b * c1[1] + c * c2[1] + e * y3];
+  }
+
+  function quad(x0, y0, cx, cy, x2, y2, u) {
+    var m = 1 - u;
+    return [m * m * x0 + 2 * m * u * cx + u * u * x2,
+            m * m * y0 + 2 * m * u * cy + u * u * y2];
+  }
+
+  function pointAlong(geometry, u) {
+    var target = u * geometry.length;
+    var cumulative = geometry.cumulative;
+    for (var i = 1; i < cumulative.length; i += 1) {
+      if (cumulative[i] >= target) {
+        var span = cumulative[i] - cumulative[i - 1] || 1;
+        var f = (target - cumulative[i - 1]) / span;
+        var a = geometry.points[i - 1];
+        var b = geometry.points[i];
+        return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
+      }
+    }
+    return geometry.points[geometry.points.length - 1];
   }
 
   // ------------------------------------------------------------------- draw
@@ -262,22 +414,24 @@
     .attr('id', 'arrow')
     .attr('viewBox', '0 -4 8 8')
     .attr('refX', 7).attr('refY', 0)
-    .attr('markerWidth', 5).attr('markerHeight', 5)
+    .attr('markerWidth', 3.4).attr('markerHeight', 3.4)
     .attr('orient', 'auto')
     .append('path')
     .attr('d', 'M0,-3.2L7,0L0,3.2')
     .attr('fill', 'currentColor');
 
-  var edgeWidth = d3.scaleSqrt().domain([0, 1]).range([0.7, 6.2]);
+  links.forEach(function (link) { link.geometry = buildGeometry(link); });
+
+  var edgeWidth = d3.scaleSqrt().domain([0, 1]).range([0.6, 2.6]);
 
   var edgeSel = d3.select('#layer-edges').selectAll('path')
     .data(links)
     .join('path')
     .attr('class', 'edge')
-    .attr('d', edgePath)
+    .attr('d', function (d) { return d.geometry.d; })
     .attr('stroke-width', function (d) { return edgeWidth(d.frequency); })
     .attr('marker-end', 'url(#arrow)')
-    .style('color', '#2a313c');
+    .style('color', DORMANT);
 
   var glowSel = d3.select('#layer-glow').selectAll('circle')
     .data(nodes, function (d) { return d.id; })
@@ -285,7 +439,7 @@
     .attr('class', 'glow')
     .attr('cx', function (d) { return d.x; })
     .attr('cy', function (d) { return d.y; })
-    .attr('fill', 'url(#hot-glow)')
+    .attr('fill', 'url(#glow-cyan)')
     .attr('r', 0)
     .attr('opacity', 0);
 
@@ -293,54 +447,342 @@
     .data(nodes, function (d) { return d.id; })
     .join('g')
     .attr('class', 'node-group')
+    // The visible name wraps onto two lines, so the whole one is carried here
+    // for anything reading the graph rather than looking at it.
+    .attr('aria-label', function (d) { return d.label; })
     .attr('transform', function (d) { return 'translate(' + d.x + ',' + d.y + ')'; });
 
-  nodeSel.append('circle').attr('class', 'status-ring')
-    .attr('r', function (d) { return d.r + 7; })
-    .attr('opacity', 0);
+  /* The glyph, from the outside in: an outer ring for behaviour class, a swept
+     ring for spend share, the body, and a glowing core whose size is the share
+     of billed output that is reasoning the caller never sees. The rollout
+     status rides as a small dot in orbit. */
 
   nodeSel.append('circle').attr('class', 'class-ring')
-    .attr('r', function (d) { return d.r + 3.5; })
+    .attr('r', function (d) { return d.r + 9; })
+    .attr('fill', 'none')
+    .attr('opacity', 0);
+
+  nodeSel.append('circle').attr('class', 'spend-arc')
+    .attr('r', function (d) { return d.r + 4; })
+    .attr('fill', 'none')
+    .attr('stroke-width', 2.6)
+    .attr('transform', 'rotate(-90)')
     .attr('opacity', 0);
 
   nodeSel.append('circle').attr('class', 'node-body')
     .attr('r', function (d) { return d.r; })
-    .attr('fill', '#20262e')
-    .attr('stroke', '#2f3742')
+    .attr('fill', SURFACE)
+    .attr('stroke', DORMANT)
     .attr('stroke-width', 1.2);
 
-  nodeSel.append('circle').attr('class', 'reasoning-band')
-    .attr('fill', 'none')
-    .attr('stroke', 'url(#reasoning-stripe)')
-    .attr('opacity', 0)
-    .attr('transform', 'rotate(-90)');
-
-  nodeSel.append('text').attr('class', 'reasoning-text')
-    .attr('text-anchor', 'middle')
-    .attr('dy', '0.36em')
-    .attr('font-size', 11)
-    .attr('font-weight', 700)
-    .attr('fill', '#1a1206')
+  nodeSel.append('circle').attr('class', 'core-bloom')
+    .attr('r', 0)
+    .attr('fill', 'url(#glow-cyan)')
     .attr('opacity', 0);
 
+  nodeSel.append('circle').attr('class', 'core')
+    .attr('r', 0)
+    .attr('opacity', 0);
+
+  nodeSel.append('text').attr('class', 'core-text')
+    .attr('dy', '0.35em')
+    .attr('opacity', 0);
+
+  nodeSel.append('circle').attr('class', 'status-dot')
+    .attr('r', 4.2)
+    .attr('cx', function (d) { return Math.cos(0.61) * (d.r + 13); })
+    .attr('cy', function (d) { return Math.sin(0.61) * (d.r + 13); })
+    .attr('stroke', SPACE)
+    .attr('stroke-width', 1.6)
+    .attr('opacity', 0);
+
+  nodeSel.append('circle').attr('class', 'hover-ring')
+    .attr('r', function (d) { return d.r + 13; });
+
   nodeSel.append('text').attr('class', 'node-label')
-    .attr('y', function (d) { return d.r + 17; })
-    .text(function (d) { return d.label; });
+    .attr('y', function (d) { return d.r + 21; })
+    .selectAll('tspan')
+    .data(function (d) {
+      return d.labelLines.map(function (line, index) {
+        return { line: line, index: index };
+      });
+    })
+    .join('tspan')
+    .attr('x', 0)
+    .attr('dy', function (d) { return d.index === 0 ? 0 : 11; })
+    .text(function (d) { return d.line; });
 
   nodeSel.append('text').attr('class', 'node-badge')
-    .attr('y', function (d) { return d.r + 30; })
+    .attr('y', function (d) { return d.r + 21 + d.labelLines.length * 11; })
     .attr('opacity', 0);
 
   nodeSel.append('circle').attr('class', 'node-hit')
-    .attr('r', function (d) { return d.r + 12; });
+    .attr('r', function (d) { return d.r + 13; });
 
-  // Behaviour class is drawn as a border treatment, taught at beat five.
-  var CLASS_STROKE = {
-    'transform': { dash: null, width: 1.6 },
-    'tool decider': { dash: '7 5', width: 1.8 },
-    'retrieval': { dash: '2 4', width: 2.0 },
-    'orchestration': { dash: '14 4 3 4', width: 2.4 }
-  };
+  // ----------------------------------------------------------- the camera
+
+  /* One camera drives both renderers. It refits on every beat transition and
+     whenever an overlay opens, so the graph is always centred in whatever
+     rectangle is actually free — which is how the composition stays inside
+     its band instead of spilling over the caption. */
+
+  var camera = { x: 0, y: 0, k: 1 };
+
+  /* How much of the canvas an overlay has taken, so the camera can frame the
+     graph in what is left rather than letting the two fight for the pixels. */
+  function overlaySpace() {
+    if (state.cardOpen && state.beat >= 6) return CARD_SPACE;
+    return visuals(state.beat).panel ? PANEL_SPACE : 0;
+  }
+
+  function boundsOf(subset) {
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    subset.forEach(function (d) {
+      x0 = Math.min(x0, d.x - extentSide(d));
+      x1 = Math.max(x1, d.x + extentSide(d));
+      y0 = Math.min(y0, d.y - extentTop(d));
+      y1 = Math.max(y1, d.y + extentBottom(d));
+    });
+    return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+  }
+
+  function targetCamera() {
+    /* At the cold open there is one call site on screen and a question above
+       it, so the camera holds low in the frame and leaves the top of the band
+       to the question. From beat one on it frames the whole system, centred in
+       whatever the overlays have left. */
+    var coldOpen = state.beat === 0;
+    var subset = coldOpen ? nodes.filter(function (d) { return d.layer === 0; }) : nodes;
+    var bounds = boundsOf(subset);
+    var width = CANVAS_W - overlaySpace();
+    var availableWidth = width * (1 - 2 * FIT_PADDING);
+    var availableHeight = CANVAS_H * (1 - 2 * FIT_PADDING);
+    var k = Math.min(availableWidth / bounds.w, availableHeight / bounds.h, coldOpen ? 1.3 : 1.6);
+    var anchor = coldOpen ? 0.66 : 0.5;
+    return {
+      k: k,
+      x: width / 2 - k * (bounds.x + bounds.w / 2),
+      y: CANVAS_H * anchor - k * (bounds.y + bounds.h / 2)
+    };
+  }
+
+  function applyCamera(next) {
+    camera = next;
+    viewport.attr('transform',
+      'translate(' + camera.x + ',' + camera.y + ') scale(' + camera.k + ')');
+  }
+
+  function fitCamera(animate) {
+    var next = targetCamera();
+    if (!animate || REDUCED) { applyCamera(next); return; }
+    var from = { x: camera.x, y: camera.y, k: camera.k };
+    svg.transition('camera').duration(760).ease(d3.easeCubicInOut)
+      .tween('camera', function () {
+        var interpolate = d3.interpolateObject(from, next);
+        return function (t) { applyCamera(interpolate(t)); };
+      });
+  }
+
+  applyCamera(targetCamera());
+
+  // ------------------------------------------------------ particle system
+
+  /* Directed traffic, drawn as light. Speed follows how often an edge is
+     walked, density follows how much volume it carries, and colour follows the
+     same heat ramp the nodes use, so the flow and the glyphs are telling one
+     story. Everything here is synthetic, like every other number on the page. */
+
+  var canvas = document.getElementById('particles');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var ctx = null;
+  try {
+    ctx = canvas && canvas.getContext ? canvas.getContext('2d') : null;
+  } catch (error) {
+    ctx = null;              // a document with no canvas support; the page still works
+  }
+
+  if (canvas) {
+    canvas.width = Math.round(CANVAS_W * DPR);
+    canvas.height = Math.round(CANVAS_H * DPR);
+  }
+
+  var flow = links.map(function (link) {
+    var count = Math.max(3, Math.round(3 + link.frequency * 16));
+    var particles = [];
+    for (var i = 0; i < count; i += 1) {
+      particles.push({
+        u: (i + 0.37 * (i % 3)) / count,     // spread without a random source
+        size: 1.5 + link.frequency * 1.7
+      });
+    }
+    return {
+      link: link,
+      particles: particles,
+      pixelsPerSecond: 34 + link.frequency * 120,
+      // Eased towards their targets each frame so a beat change is a fade,
+      // not a jump.
+      alpha: 0, targetAlpha: 0,
+      density: 0.8, targetDensity: 0.8,
+      speedScale: 1, targetSpeedScale: 1,
+      color: CYAN, targetColor: CYAN
+    };
+  });
+
+  var flowByKey = {};
+  flow.forEach(function (f) { flowByKey[f.link.source.id + '>' + f.link.target.id] = f; });
+
+  var pulses = [];          // beat one: the single trajectory racing the counter
+
+  var spriteCache = {};
+
+  function sprite(color) {
+    if (spriteCache[color]) return spriteCache[color];
+    var size = 34;
+    var offscreen = document.createElement('canvas');
+    offscreen.width = size;
+    offscreen.height = size;
+    var g = null;
+    try { g = offscreen.getContext ? offscreen.getContext('2d') : null; } catch (e) { g = null; }
+    if (!g || !g.createRadialGradient) return null;
+    var rgb = d3.rgb(color);
+    var body = rgb.r + ',' + rgb.g + ',' + rgb.b;
+    var gradient = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0, 'rgba(255,255,255,0.92)');
+    gradient.addColorStop(0.2, 'rgba(' + body + ',0.95)');
+    gradient.addColorStop(0.5, 'rgba(' + body + ',0.3)');
+    gradient.addColorStop(1, 'rgba(' + body + ',0)');
+    g.fillStyle = gradient;
+    g.fillRect(0, 0, size, size);
+    spriteCache[color] = offscreen;
+    return offscreen;
+  }
+
+  /* What the traffic should look like at this beat, under these filters, at
+     this rollout week. Called once per render, never per frame. */
+  function updateFlow(snapshot, v) {
+    flow.forEach(function (f) {
+      var sourceRow = snapshot.rows[f.link.source.id];
+      var targetRow = snapshot.rows[f.link.target.id];
+      var live = sourceRow.hot && targetRow.hot;
+      var heat = Math.max(sourceRow.heat, targetRow.heat);
+      var statuses = [sourceRow.status, targetRow.status];
+
+      if (!v.flow) {
+        f.targetAlpha = 0;
+        return;
+      }
+      if (!v.heat) {
+        // Beat two: the whole system running, before anyone has been told
+        // where the money is.
+        f.targetAlpha = 0.8;
+        f.targetColor = CYAN;
+        f.targetDensity = 0.8;
+        f.targetSpeedScale = 1;
+        return;
+      }
+
+      f.targetColor = HEAT_RAMP(heat);
+      f.targetAlpha = live ? 0.95 : 0.05;
+      f.targetDensity = 0.8;
+      f.targetSpeedScale = 1;
+
+      // Beat seven. A call site that has migrated is running the cheaper model,
+      // so its traffic goes emerald and visibly thins out. A call site on hold
+      // keeps its dense flow and picks up the amber of the exception.
+      if (statuses.indexOf('migrated') >= 0) {
+        f.targetColor = STATUS_COLOR.migrated;
+        f.targetAlpha = Math.max(f.targetAlpha, 0.5);
+        f.targetDensity = 0.32;
+        f.targetSpeedScale = 0.7;
+      } else if (statuses.indexOf('hold') >= 0) {
+        f.targetColor = mix(HEAT_RAMP(heat), STATUS_COLOR.hold, 0.42);
+        f.targetAlpha = 1;
+        f.targetDensity = 1;
+        f.targetSpeedScale = 1.15;
+      }
+    });
+  }
+
+  function stepFlow(dt) {
+    var ease = Math.min(1, dt * 3.4);
+    for (var i = 0; i < flow.length; i += 1) {
+      var f = flow[i];
+      f.alpha += (f.targetAlpha - f.alpha) * ease;
+      f.density += (f.targetDensity - f.density) * ease;
+      f.speedScale += (f.targetSpeedScale - f.speedScale) * ease;
+      if (f.color !== f.targetColor) f.color = f.targetColor;
+
+      if (f.alpha < 0.005) continue;
+      var boost = (hoverNode &&
+        (hoverNode === f.link.source.id || hoverNode === f.link.target.id)) ? 2.4 : 1;
+      var step = (f.pixelsPerSecond * f.speedScale * boost * dt) / f.link.geometry.length;
+      for (var p = 0; p < f.particles.length; p += 1) {
+        f.particles[p].u = (f.particles[p].u + step) % 1;
+      }
+    }
+
+    for (var q = pulses.length - 1; q >= 0; q -= 1) {
+      var pulse = pulses[q];
+      pulse.u += dt / pulse.duration;
+      if (pulse.u >= 1) pulses.splice(q, 1);
+    }
+  }
+
+  function drawFlow() {
+    if (!ctx) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(camera.k * DPR, 0, 0, camera.k * DPR, camera.x * DPR, camera.y * DPR);
+    ctx.globalCompositeOperation = 'lighter';
+
+    for (var i = 0; i < flow.length; i += 1) {
+      var f = flow[i];
+      if (f.alpha < 0.02) continue;
+      var image = sprite(f.color);
+      if (!image) continue;
+      var shown = Math.max(1, Math.ceil(f.particles.length * f.density));
+      ctx.globalAlpha = f.alpha;
+      for (var p = 0; p < shown; p += 1) {
+        var particle = f.particles[p];
+        var at = pointAlong(f.link.geometry, particle.u);
+        var halo = particle.size * 2.7;
+        ctx.drawImage(image, at[0] - halo, at[1] - halo, halo * 2, halo * 2);
+      }
+    }
+
+    for (var q = 0; q < pulses.length; q += 1) {
+      var pulse = pulses[q];
+      var head = sprite('#A5F3FC');
+      if (!head) break;
+      var point = pointAlong(pulse.geometry, Math.min(1, pulse.u));
+      var size = 13 * (1 - 0.45 * pulse.u);
+      ctx.globalAlpha = 1 - pulse.u * 0.6;
+      ctx.drawImage(head, point[0] - size, point[1] - size, size * 2, size * 2);
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  var lastFrame = 0;
+
+  function frame(now) {
+    if (!REDUCED) window.requestAnimationFrame(frame);
+    var dt = lastFrame ? Math.min(0.05, (now - lastFrame) / 1000) : 0.016;
+    lastFrame = now;
+    stepFlow(dt);
+    drawFlow();
+  }
+
+  if (ctx && window.requestAnimationFrame) {
+    if (REDUCED) {
+      // Still show where the traffic is, just hold it still.
+      stepFlow(1);
+      drawFlow();
+    } else {
+      window.requestAnimationFrame(frame);
+    }
+  }
 
   // ---------------------------------------------------------------- filters
 
@@ -352,6 +794,7 @@
       .attr('class', function (d) { return 'chip' + (state[key] === d.value ? ' active' : ''); })
       .text(function (d) { return d.label; })
       .on('click', function (event, d) {
+        event.stopPropagation();
         state[key] = d.value;
         state.selected = null;
         state.cardOpen = false;
@@ -387,11 +830,6 @@
     render();
   });
 
-  d3.select('#scrub-ticks').selectAll('span')
-    .data(TIMELINE.weeks)
-    .join('span')
-    .text(function (d) { return 'W' + d.week; });
-
   // --------------------------------------------------------------- tooltip
 
   var tooltip = d3.select('#tooltip');
@@ -424,16 +862,18 @@
     );
 
     tooltip.classed('on', true)
-      .style('left', Math.min(x + 18, 1440 - 250) + 'px')
-      .style('top', Math.min(y + 14, 900 - 210) + 'px');
+      .style('left', Math.min(x + 18, 1440 - 262) + 'px')
+      .style('top', Math.min(y + 14, 900 - 240) + 'px');
   }
 
   function hideTooltip() { tooltip.classed('on', false); }
 
   nodeSel.select('.node-hit')
     .on('mousemove', showTooltip)
-    .on('mouseleave', hideTooltip)
+    .on('mouseenter', function (event, node) { hoverNode = node.id; })
+    .on('mouseleave', function () { hoverNode = null; hideTooltip(); })
     .on('click', function (event, node) {
+      event.stopPropagation();
       if (state.beat < 3) return;
       hideTooltip();
       state.selected = node.id;
@@ -465,9 +905,11 @@
 
     var rows = top.map(function (node) {
       var row = snapshot.rows[node.id];
-      return { label: node.label, share: row.spendShare, cost: row.cost, hot: row.hot };
+      return { label: node.label, share: row.spendShare, cost: row.cost,
+               hot: row.hot, heat: row.heat, status: row.status };
     });
-    rows.push({ label: restCount + ' other call sites', share: restShare, cost: null, hot: false });
+    rows.push({ label: restCount + ' other call sites', share: restShare, cost: null,
+                hot: false, heat: 0, status: 'unmeasured' });
 
     var sel = d3.select('#spend-bars').selectAll('div.spend-row').data(rows);
     var enter = sel.enter().append('div').attr('class', 'spend-row');
@@ -480,9 +922,14 @@
     merged.select('.spend-value').text(function (d) {
       return fmtPct1(d.share) + (d.cost === null ? '' : ' · ' + fmtUsd0(d.cost));
     });
-    merged.select('.spend-fill').style('width', function (d) {
-      return Math.max(1, d.share * 100 / Math.max(0.0001, rows[0].share)) + '%';
-    });
+    merged.select('.spend-fill')
+      .style('width', function (d) {
+        return Math.max(1, d.share * 100 / Math.max(0.0001, rows[0].share)) + '%';
+      })
+      .style('background', function (d) {
+        if (d.status === 'migrated') return STATUS_COLOR.migrated;
+        return d.hot ? HEAT_RAMP(d.heat) : DORMANT;
+      });
     sel.exit().remove();
 
     var filterNote = [];
@@ -513,9 +960,11 @@
     var head =
       '<div class="card-kicker">Decision card</div>' +
       '<h3 class="card-title">' + node.label + '</h3>' +
+      '<div class="card-provenance">' +
       '<div class="card-arms">' + CARDS.candidate.label + ' compared against ' +
       CARDS.incumbent.label + '</div>' +
-      '<div class="tag-synthetic"><span class="badge-dot"></span>Illustrative — synthetic values</div>';
+      '<div class="tag-synthetic"><span class="badge-dot"></span>Illustrative — synthetic values</div>' +
+      '</div>';
 
     /* The rollout row only appears once the scrubber exists. Before beat seven
        there is no week on screen to attach it to, and showing "week one:
@@ -530,15 +979,18 @@
       var blank = CARDS.unmeasured_card;
       d3.select('#card-body').html(
         head +
+        '<div class="card-columns"><div class="card-column">' +
         '<div class="verdict is-unmeasured">' +
         '<span class="verdict-word">' + blank.verdict + '</span></div>' +
         '<p class="verdict-line">' + blank.verdict_line + '</p>' +
         rollout +
+        '</div><div class="card-column">' +
         '<div class="card-why">' + blank.why + '</div>' +
         '<div class="gates-contract"><div class="gates-hash">' +
         '<span>Gates contract</span><code>version ' + gates.version + ' · ' + gates.hash + '</code>' +
         '</div><div class="gates-note">Agreed for the call sites that were measured. This one was not, ' +
-        'so no gate was evaluated against it.</div></div>'
+        'so no gate was evaluated against it.</div></div>' +
+        '</div></div>'
       );
       return;
     }
@@ -558,29 +1010,35 @@
         '</td><td class="' + gate.result + '">' + gate.result + '</td></tr>';
     }).join('');
 
+    /* Two columns. The verdict and what it rests on go on the left, the reason
+       and the contract it was judged against go on the right, and the whole
+       card fits the canvas band without a scroll — a card the audience has to
+       scroll is a card whose last line nobody reads. */
     d3.select('#card-body').html(
       head +
+      '<div class="card-columns"><div class="card-column">' +
       '<div class="verdict is-' + card.verdict_tone + '">' +
       '<span class="verdict-word">' + card.verdict + '</span>' +
       '<span class="verdict-gates">' + card.gates_evaluated + ' gates</span></div>' +
       '<p class="verdict-line">' + card.verdict_line + '</p>' +
       rollout +
       metrics +
+      '</div><div class="card-column">' +
       '<div class="card-why">' + card.why + '</div>' +
       '<div class="gates-contract">' +
       '<div class="gates-hash"><span>Gates contract</span>' +
       '<code>version ' + gates.version + ' · ' + gates.hash + '</code></div>' +
-      '<div class="gates-note">' + gates.note + ' Agreed ' + gates.agreed_on +
-      ', before anything was run. The hash is synthetic, like everything else here.</div>' +
+      '<div class="gates-note">' + gates.note + ' Agreed ' + gates.agreed_on + '.</div>' +
       '<table class="gate-table">' + gateRows + '</table>' +
       '</div>' +
-      '<div class="card-why" style="border-top:none;padding-top:4px"><b>Next.</b> ' + card.next + '</div>'
+      '<div class="card-why"><b>Next.</b> ' + card.next + '</div>' +
+      '</div></div>'
     );
   }
 
   // ------------------------------------------------------------- scoreboard
 
-  function renderScoreboard(snapshot) {
+  function renderScoreboard() {
     var counts = { migrated: 0, shadow: 0, hold: 0, other: 0 };
     nodes.forEach(function (node) {
       var status = statusOf(node.id, WEEKS);
@@ -626,17 +1084,19 @@
       coldOpen: beat === 0,
       counter: beat === 1,
       onlyOrchestrator: beat === 0,
-      trajectoryOnly: beat === 1,
       allNodes: beat >= 2,
       heat: beat >= 3,
-      panel: beat >= 3 && !(state.cardOpen && beat >= 6),
+      // Beat eight is the scoreboard's alone: the panel would sit behind it,
+      // legible through the scrim, saying something the close has moved past.
+      panel: beat >= 3 && beat !== 8 && !(state.cardOpen && beat >= 6),
       filters: beat >= 3,
       reasoning: beat >= 4,
       classRings: beat >= 5,
       badges: beat >= 5,
       scrubber: beat >= 7,
       scoreboard: beat === 8,
-      free: beat === FREE
+      free: beat === FREE,
+      flow: beat >= 2                      // ambient traffic, continuous from here on
     };
   }
 
@@ -656,6 +1116,22 @@
     document.getElementById('scoreboard').classList.toggle('on', v.scoreboard);
     document.getElementById('card').classList.toggle('on', state.cardOpen && beat >= 6);
     document.getElementById('card').setAttribute('aria-hidden', String(!state.cardOpen));
+    document.getElementById('begin-hint').classList.toggle('on', !state.everAdvanced);
+
+    /* Warm means money still sitting there. A call site that has migrated has
+       already moved its money, so it goes cool and emerald even though it is
+       still one of the larger line items. That colour change is beat seven's
+       payoff: the audience should see the heat leave one circle. */
+    function warm(d) {
+      var row = snapshot.rows[d.id];
+      return v.heat && row.hot && row.status !== 'migrated';
+    }
+
+    function nodeColor(d) {
+      var row = snapshot.rows[d.id];
+      if (row.status === 'migrated') return STATUS_COLOR.migrated;
+      return HEAT_RAMP(row.heat);
+    }
 
     // Nodes -----------------------------------------------------------------
     nodeSel.attr('opacity', function (d) {
@@ -667,21 +1143,12 @@
         if (beat >= 7 && snapshot.rows[d.id].status !== 'unmeasured') return 1;
         // The orchestrator comes back up at beat five so its "measure last"
         // badge can be read. Refusing a verdict there is the point of the beat.
-        if (v.badges && d.behavior_class === 'orchestration') return 0.62;
-        return 0.12;
+        if (v.badges && d.behavior_class === 'orchestration') return 0.6;
+        return 0.1;
       }
       if (v.onlyOrchestrator) return d.layer === 0 ? 1 : 0;
       return revealed[d.id] ? 1 : 0.06;
     });
-
-    /* Warm means money still sitting there. A call site that has migrated has
-       already moved its money, so it goes cool and teal even though it is
-       still one of the larger line items. That colour change is beat seven's
-       payoff: the audience should see the heat leave one circle. */
-    function warm(d) {
-      var row = snapshot.rows[d.id];
-      return v.heat && row.hot && row.status !== 'migrated';
-    }
 
     nodeSel.classed('hot', warm);
     nodeSel.classed('migrated', function (d) {
@@ -692,68 +1159,92 @@
       .transition().duration(820).ease(d3.easeCubicInOut)
       .attr('fill', function (d) {
         var row = snapshot.rows[d.id];
-        if (!v.heat) return '#20262e';
-        if (row.status === 'migrated') return '#123830';
-        if (!row.hot) return '#1b2027';
-        return d3.interpolateRgb('#6b3315', '#ff7a2f')(Math.pow(row.heat, 0.6));
+        if (!v.heat) return SURFACE;
+        if (row.status === 'migrated') return mix(SURFACE, STATUS_COLOR.migrated, 0.2);
+        if (!row.hot) return mix(SURFACE, DORMANT, 0.5);
+        return mix(SURFACE, nodeColor(d), 0.26);
       })
       .attr('stroke', function (d) {
         var row = snapshot.rows[d.id];
-        if (!v.heat) return '#2f3742';
-        if (row.status === 'migrated') return '#35c4a8';
-        return row.hot ? '#ffa76a' : '#232932';
+        if (!v.heat) return DORMANT;
+        if (row.status === 'migrated') return STATUS_COLOR.migrated;
+        return row.hot ? nodeColor(d) : DORMANT;
       })
       .attr('stroke-width', function (d) {
-        return v.heat && (snapshot.rows[d.id].hot || snapshot.rows[d.id].status === 'migrated')
-          ? 1.8 : 1.2;
+        var row = snapshot.rows[d.id];
+        return v.heat && (row.hot || row.status === 'migrated') ? 1.8 : 1.1;
       });
 
     glowSel
+      .attr('fill', function (d) {
+        if (snapshot.rows[d.id].status === 'hold') return glowGradient(STATUS_COLOR.hold);
+        return glowGradient(nodeColor(d));
+      })
       .transition().duration(820).ease(d3.easeCubicInOut)
       .attr('r', function (d) {
         var row = snapshot.rows[d.id];
-        return warm(d) ? d.r + 26 + row.heat * 34 : 0;
+        return warm(d) ? d.r + 16 + row.heat * 26 : 0;
       })
       .attr('opacity', function (d) {
         var row = snapshot.rows[d.id];
-        return warm(d) ? 0.35 + row.heat * 0.5 : 0;
+        return warm(d) ? 0.4 + row.heat * 0.55 : 0;
       });
 
-    // The reasoning band: an inner striped arc whose sweep is the share of
-    // billed output tokens that is reasoning the caller never sees.
-    nodeSel.select('.reasoning-band')
-      .attr('r', function (d) { return d.r * 0.60; })
-      .attr('stroke-width', function (d) { return d.r * 0.40; })
+    /* The swept ring: how much of the bill this call site is, drawn as how far
+       round the circle the arc goes. The hottest is a closed ring. */
+    nodeSel.select('.spend-arc')
+      .attr('stroke', nodeColor)
       .attr('stroke-dasharray', function (d) {
-        var circumference = 2 * Math.PI * (d.r * 0.60);
-        var share = snapshot.rows[d.id].reasoningShare;
-        return (circumference * share) + ' ' + circumference;
+        var circumference = 2 * Math.PI * (d.r + 4);
+        var sweep = circumference * snapshot.rows[d.id].heat;
+        return sweep + ' ' + circumference;
       })
-      .transition().duration(700).ease(d3.easeCubicInOut)
+      .transition().duration(760).ease(d3.easeCubicInOut)
       .attr('opacity', function (d) {
-        return v.reasoning && warm(d) ? 1 : 0;
+        if (!v.heat) return 0;
+        return snapshot.rows[d.id].hot ? 0.95 : 0;
       });
 
-    nodeSel.select('.reasoning-text')
+    /* The core: the share of billed output tokens that is reasoning the caller
+       never sees. Bigger, brighter core means more of what you pay for never
+       reaches the customer. */
+    function coreRadius(d) {
+      return d.r * (0.18 + 0.42 * snapshot.rows[d.id].reasoningShare);
+    }
+
+    nodeSel.select('.core')
+      .attr('fill', nodeColor)
+      .transition().duration(760).ease(d3.easeCubicInOut)
+      .attr('r', function (d) { return v.reasoning && warm(d) ? coreRadius(d) : 0; })
+      .attr('opacity', function (d) { return v.reasoning && warm(d) ? 1 : 0; });
+
+    nodeSel.select('.core-bloom')
+      .attr('fill', function (d) { return glowGradient(nodeColor(d)); })
+      .transition().duration(760).ease(d3.easeCubicInOut)
+      .attr('r', function (d) { return v.reasoning && warm(d) ? coreRadius(d) * 2.4 : 0; })
+      .attr('opacity', function (d) { return v.reasoning && warm(d) ? 1 : 0; });
+
+    nodeSel.select('.core-text')
       .text(function (d) { return fmtPct0(snapshot.rows[d.id].reasoningShare); })
       .transition().duration(700)
       .attr('opacity', function (d) {
-        return v.reasoning && warm(d) && d.r > 26 ? 0.92 : 0;
+        return v.reasoning && warm(d) && coreRadius(d) >= 11 ? 1 : 0;
       });
 
     nodeSel.select('.class-ring')
       .attr('stroke', function (d) {
-        if (snapshot.rows[d.id].status === 'migrated') return '#7fd9c8';
-        return snapshot.rows[d.id].hot ? '#ffb98a' : '#5c6673';
+        var row = snapshot.rows[d.id];
+        if (row.status === 'migrated') return STATUS_COLOR.migrated;
+        return row.hot ? nodeColor(d) : '#475569';
       })
       .attr('stroke-width', function (d) { return CLASS_STROKE[d.behavior_class].width; })
       .attr('stroke-dasharray', function (d) { return CLASS_STROKE[d.behavior_class].dash; })
       .transition().duration(640)
-      .attr('opacity', v.classRings ? 0.95 : 0);
+      .attr('opacity', v.classRings ? 0.9 : 0);
 
     nodeSel.select('.node-badge')
       .attr('fill', function (d) {
-        return d.behavior_class === 'orchestration' ? '#8b939e' : '#f0a34a';
+        return d.behavior_class === 'orchestration' ? '#94A3B8' : CYAN;
       })
       .text(function (d) {
         if (d.behavior_class === 'orchestration') return 'measure last';
@@ -766,12 +1257,12 @@
         return snapshot.rows[d.id].hot || d.behavior_class === 'orchestration' ? 0.95 : 0;
       });
 
-    nodeSel.select('.status-ring')
-      .attr('stroke', function (d) { return STATUS_COLOR[snapshot.rows[d.id].status]; })
+    nodeSel.select('.status-dot')
+      .attr('fill', function (d) { return STATUS_COLOR[snapshot.rows[d.id].status]; })
       .transition().duration(640)
       .attr('opacity', function (d) {
         if (beat < 7) return 0;
-        return snapshot.rows[d.id].status === 'unmeasured' ? 0 : 0.95;
+        return snapshot.rows[d.id].status === 'unmeasured' ? 0 : 1;
       });
 
     nodeSel.select('.node-label')
@@ -782,31 +1273,33 @@
       });
 
     // Edges -----------------------------------------------------------------
+    // The lines are only a scaffold now; the particles carry the traffic.
     edgeSel
       .transition().duration(760).ease(d3.easeCubicInOut)
       .attr('opacity', function (d) {
-        if (!v.allNodes) {
-          return litEdges[d.source.id + '>' + d.target.id] ? 0.85 : 0.04;
-        }
-        if (!v.heat) return 0.42;
-        var hot = snapshot.rows[d.source.id].hot && snapshot.rows[d.target.id].hot;
-        return hot ? 0.6 : 0.07;
+        if (!v.allNodes) return litEdges[d.source.id + '>' + d.target.id] ? 0.7 : 0.05;
+        if (!v.heat) return 0.3;
+        var live = snapshot.rows[d.source.id].hot && snapshot.rows[d.target.id].hot;
+        return live ? 0.42 : 0.06;
       })
       .attr('stroke', function (d) {
-        if (!v.heat) return litEdges[d.source.id + '>' + d.target.id] ? '#ff7a2f' : '#2a313c';
-        var hot = snapshot.rows[d.source.id].hot && snapshot.rows[d.target.id].hot;
-        return hot ? '#a8532a' : '#232932';
+        if (!v.heat) return litEdges[d.source.id + '>' + d.target.id] ? CYAN : DORMANT;
+        var live = snapshot.rows[d.source.id].hot && snapshot.rows[d.target.id].hot;
+        return live ? HEAT_RAMP(Math.max(snapshot.rows[d.source.id].heat,
+                                         snapshot.rows[d.target.id].heat)) : DORMANT;
       })
       .style('color', function (d) {
-        if (!v.heat) return '#2a313c';
-        var hot = snapshot.rows[d.source.id].hot && snapshot.rows[d.target.id].hot;
-        return hot ? '#a8532a' : '#232932';
+        if (!v.heat) return DORMANT;
+        var live = snapshot.rows[d.source.id].hot && snapshot.rows[d.target.id].hot;
+        return live ? CYAN : DORMANT;
       });
+
+    updateFlow(snapshot, v);
 
     // Chrome ----------------------------------------------------------------
     if (v.panel) renderPanel(snapshot);
     if (state.cardOpen) renderCard(snapshot);
-    if (v.scoreboard) renderScoreboard(snapshot);
+    if (v.scoreboard) renderScoreboard();
     if (v.scrubber) renderScrubber(snapshot);
 
     scrubRange.value = String(snapshot.week);
@@ -814,6 +1307,11 @@
     var beatMeta = BEATS[beat];
     d3.select('#caption-beat').text(beatMeta.tag);
     d3.select('#caption-line').text(beatMeta.line);
+    d3.select('#beat-count').text(beat === FREE
+      ? 'pan, zoom and hover'
+      : 'beat ' + (beat + 1) + ' of ' + NUMBERED_BEATS);
+
+    renderNavigation();
 
     d3.select('#footer-provenance').text(
       'synthetic traces · seed ' + GRAPH.meta.seed +
@@ -842,16 +1340,17 @@
     if (snapshot.week > 1) {
       var previous = weeklySpendPerDay(snapshot.week - 1);
       if (perDay > previous + 0.5) {
-        stepNote = '<span class="delta-up"> · ▲ ' + fmtUsd0(perDay - previous) +
-          ' on last week</span>';
+        stepNote = '<div class="delta-up">▲ ' + fmtUsd0(perDay - previous) +
+          ' on last week</div>';
       }
     }
 
     d3.select('#scrub-spend').html(
       'spend <b>' + fmtUsd0(perDay) + '</b> per day ' +
       (deltaClass
-        ? '<span class="' + deltaClass + '">' + arrow + fmtPct1(Math.abs(delta)) + '</span> vs week one'
-        : '<span style="color:#5b636e">at the week one rate</span>') +
+        ? '<span class="' + deltaClass + '">' + arrow + fmtPct1(Math.abs(delta)) +
+          '</span> against week one'
+        : '<span style="color:#4E5A6E">at the week one rate</span>') +
       stepNote
     );
   }
@@ -898,9 +1397,9 @@
     function beat() {
       if (state.beat !== 0) return;
       body.transition().duration(760).ease(d3.easeCubicOut)
-        .attr('stroke', '#ff7a2f').attr('stroke-width', 3.2)
+        .attr('stroke', CYAN).attr('stroke-width', 3)
         .transition().duration(760).ease(d3.easeCubicIn)
-        .attr('stroke', '#2f3742').attr('stroke-width', 1.2)
+        .attr('stroke', DORMANT).attr('stroke-width', 1.2)
         .on('end', function () { later(beat, 120); });
     }
     beat();
@@ -911,6 +1410,7 @@
       || TRAJECTORIES.trajectories[0];
     revealed = {};
     litEdges = {};
+    pulses.length = 0;
     var counterValue = document.getElementById('counter-value');
     counterValue.textContent = '0';
 
@@ -928,7 +1428,7 @@
         var key = parent + '>' + call.call_site;
         if (edgeKey[key]) {
           litEdges[key] = true;
-          flyAlong(parent, call.call_site);
+          firePulse(key);
         }
       }
       counterValue.textContent = String(index + 1);
@@ -940,7 +1440,8 @@
 
   /* Beat one fires forty seven times in five seconds. A full render each time
      would restart every transition on the page, so the reveal touches only the
-     two things that change: which call sites are lit and which edges are lit. */
+     three things that change: which call sites are lit, which edges are lit,
+     and one bright pulse racing down the hop that just happened. */
   function paintReveal() {
     nodeSel.attr('opacity', function (d) { return revealed[d.id] ? 1 : 0.06; });
     nodeSel.select('.node-label').attr('opacity', function (d) {
@@ -948,26 +1449,18 @@
     });
     edgeSel
       .attr('opacity', function (d) {
-        return litEdges[d.source.id + '>' + d.target.id] ? 0.85 : 0.04;
+        return litEdges[d.source.id + '>' + d.target.id] ? 0.7 : 0.05;
       })
       .attr('stroke', function (d) {
-        return litEdges[d.source.id + '>' + d.target.id] ? '#ff7a2f' : '#2a313c';
+        return litEdges[d.source.id + '>' + d.target.id] ? CYAN : DORMANT;
       });
   }
 
-  function flyAlong(sourceId, targetId) {
-    var source = byId[sourceId];
-    var target = byId[targetId];
-    if (!source || !target) return;
-    d3.select('#layer-flyer').append('circle')
-      .attr('class', 'flyer')
-      .attr('r', 3.6)
-      .attr('cx', source.x).attr('cy', source.y)
-      .transition().duration(320).ease(d3.easeCubicInOut)
-      .attr('cx', target.x).attr('cy', target.y)
-      .attr('r', 2.2)
-      .style('opacity', 0)
-      .remove();
+  function firePulse(key) {
+    var link = edgeKey[key];
+    if (!link) return;
+    pulses.push({ geometry: link.geometry, u: 0, duration: 0.34 });
+    if (pulses.length > 12) pulses.shift();
   }
 
   function completeTrajectory() {
@@ -995,11 +1488,48 @@
 
   // ------------------------------------------------------------- navigation
 
+  var dotSel = d3.select('#beat-dots').selectAll('button.beat-dot')
+    .data(d3.range(NUMBERED_BEATS))
+    .join('button')
+    .attr('class', 'beat-dot')
+    .attr('type', 'button')
+    .attr('title', function (i) { return BEATS[i].tag; })
+    .attr('aria-label', function (i) { return BEATS[i].tag; })
+    .on('click', function (event, i) { event.stopPropagation(); goTo(i); });
+
+  var explorePill = d3.select('#beat-dots').append('button')
+    .attr('class', 'beat-pill')
+    .attr('type', 'button')
+    .attr('id', 'beat-explore')
+    .attr('title', BEATS[FREE].tag)
+    .text('Explore')
+    .on('click', function (event) { event.stopPropagation(); goTo(FREE); });
+
+  document.getElementById('nav-prev').addEventListener('click', function (event) {
+    event.stopPropagation();
+    goTo(state.beat - 1);
+  });
+
+  document.getElementById('nav-next').addEventListener('click', function (event) {
+    event.stopPropagation();
+    goTo(state.beat + 1);
+  });
+
+  function renderNavigation() {
+    dotSel
+      .classed('on', function (i) { return i === state.beat; })
+      .classed('past', function (i) { return i < state.beat; });
+    explorePill.classed('on', state.beat === FREE);
+    document.getElementById('nav-prev').disabled = state.beat === 0;
+    document.getElementById('nav-next').disabled = state.beat === FREE;
+  }
+
   function goTo(beat) {
     beat = Math.max(0, Math.min(FREE, beat));
     var previous = state.beat;
+    if (beat !== 0) state.everAdvanced = true;
     clearTimers();
-    d3.select('#layer-flyer').selectAll('*').remove();
+    pulses.length = 0;
     state.beat = beat;
 
     if (beat < 7) state.week = 1;
@@ -1007,8 +1537,10 @@
     if (beat === FREE && previous === 8) state.week = WEEKS;
 
     // The decision card opens on the hottest call site at beat six and stays
-    // open through the rollout, because the rollout is that card's story.
-    if (beat >= 6) {
+    // open through the rollout, because the rollout is that card's story. Beat
+    // eight takes it back down: the scoreboard is the closing image and should
+    // not have to share the canvas with anything.
+    if (beat >= 6 && beat !== 8) {
       if (!state.selected) {
         state.selected = view().ranked[0].id;
         state.cardOpen = true;
@@ -1037,6 +1569,7 @@
 
     updateZoomAvailability();
     render();
+    fitCamera(true);
   }
 
   window.addEventListener('keydown', function (event) {
@@ -1049,35 +1582,42 @@
     } else if (event.key === 'Escape') {
       state.cardOpen = false;
       render();
+      fitCamera(true);
     } else if (event.key === 'Home') {
       goTo(0);
     }
   });
 
+  /* Clicking the canvas advances. Anything that is itself a control keeps its
+     own click, and every one of those controls looks like a control — there
+     are no invisible hotspots left on this page. */
+  var INTERACTIVE = '#controls, #filters, #card, #panel, #scrubber, #scoreboard-links, ' +
+                    '.node-hit, a, button, input';
+
   document.getElementById('stage').addEventListener('click', function (event) {
-    // Clicks on the controls drive the controls, not the beat.
-    if (event.target.closest('#filters, #card, #scrubber, .node-hit, #scoreboard-links')) return;
+    if (event.target.closest && event.target.closest(INTERACTIVE)) return;
     goTo(state.beat + 1);
   });
 
   // --------------------------------------------------------- free explore
 
+  /* The extent is stated rather than inferred. The canvas band is the frame the
+     audience is looking at, so that is what a pan is measured against — and
+     saying so keeps the zoom off the document's own idea of the viewport. */
   var zoom = d3.zoom()
-    .scaleExtent([0.55, 3.4])
-    .on('zoom', function (event) {
-      viewport.attr('transform', event.transform);
-    });
+    .extent([[0, 0], [CANVAS_W, CANVAS_H]])
+    .scaleExtent([0.4, 3.4])
+    .on('zoom', function (event) { applyCamera(event.transform); });
 
   // Pan and zoom belong to free explore only. During the beats the camera is
   // the presenter's, not the audience's.
   function updateZoomAvailability() {
     if (state.beat === FREE) {
       svg.call(zoom).on('dblclick.zoom', null);
+      svg.call(zoom.transform,
+        d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k));
     } else {
       svg.on('.zoom', null);
-      if (viewport.attr('transform')) {
-        viewport.transition().duration(640).attr('transform', null);
-      }
     }
   }
 
@@ -1086,7 +1626,10 @@
   function fitStage() {
     var scale = Math.min(window.innerWidth / 1440, window.innerHeight / 900);
     stageScale = Math.min(1, scale);
-    document.getElementById('stage').style.transform = 'scale(' + stageScale + ')';
+    var left = Math.max(0, (window.innerWidth - CANVAS_W * stageScale) / 2);
+    var top = Math.max(0, (window.innerHeight - 900 * stageScale) / 2);
+    document.getElementById('stage').style.transform =
+      'translate(' + left + 'px,' + top + 'px) scale(' + stageScale + ')';
   }
 
   window.addEventListener('resize', fitStage);

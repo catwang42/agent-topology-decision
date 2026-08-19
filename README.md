@@ -26,17 +26,23 @@ That is the whole thing. No server, no build, no network. Open the file.
 
 ## Present it
 
-The right arrow, the space bar, or a click advances a beat. The left arrow goes
-back one. Every beat is a pure function of the beat number, so you can walk it
-backwards mid-presentation without anything getting stuck.
+Three ways to advance, all of them visible. The control bar across the bottom
+carries an arrow either side and a dot for every beat, so you can jump straight
+to one; the right arrow key, the space bar, or a click anywhere on the canvas
+steps forward; the left arrow steps back. On load a pulsing affordance says
+*click anywhere to begin* and leaves once you have. Nothing on this page is
+clickable without looking clickable.
+
+Every beat is a pure function of the beat number, so you can walk it backwards
+mid-presentation without anything getting stuck.
 
 | Beat | What happens | The line |
 | --- | --- | --- |
 | 0 | A question types itself; one node pulses | A customer asks one question. |
 | 1 | One trajectory animates call by call, counter to forty seven | One question. Forty-seven model calls. This is why "which model" feels unanswerable. |
-| 2 | The trajectory fades; thirty days of traffic overlay it | Stop evaluating runs. Look at the system. |
-| 3 | Cost heat ignites — four nodes glow, fifteen fall away | Your fifty-call problem is a four-node problem. |
-| 4 | A striped inner band shows billed reasoning share | Part of this heat isn't work — it's default settings. |
+| 2 | The trajectory fades and thirty days of traffic flood the edges | Stop evaluating runs. Look at the system. |
+| 3 | Spend ignites — four glyphs run hot, fifteen fall to near black | Your fifty-call problem is a four-node problem. |
+| 4 | A glowing core opens inside each glyph: billed reasoning share | Part of this heat isn't work — it's default settings. |
 | 5 | Behaviour class borders draw on; readiness badges appear | The instrument matches the behavior — and we refuse verdicts where we didn't measure. |
 | 6 | The decision card slides in on the hottest call site | Three numbers and a contract. That's what "safe to move" looks like. |
 | 7 | The scrubber drags across eight weeks of rollout | One call site at a time. Never big-bang. Watch the bill. |
@@ -52,10 +58,27 @@ one team changes which four call sites are the hot four.
 
 Nineteen call sites in a generic enterprise customer support agent, spanning
 the four behaviour classes the workbench distinguishes: **transform**,
-**tool decider**, **retrieval**, and **orchestration**. Circle area is call
-volume. Warmth and glow are spend. Those two deliberately disagree, because the
-biggest circle is not the most expensive one, and that is the first thing a
-map is for.
+**tool decider**, **retrieval**, and **orchestration**.
+
+Each call site is a set of concentric rings rather than a flat disc, and every
+ring carries one thing:
+
+| Ring | What it encodes |
+| --- | --- |
+| Outer ring, stroke pattern | Behaviour class — one pattern per class |
+| Swept ring | Share of total spend, drawn as an arc around the glyph |
+| Body, radius | Call volume over the thirty day window |
+| Body, colour | Spend intensity, on the cyan to violet to magenta ramp |
+| Inner core | Share of billed output that is reasoning the caller never sees |
+| Orbit dot | Rollout status — migrated, in shadow, canary, or hold |
+
+Radius and colour deliberately disagree, because the biggest circle is not the
+most expensive one, and that is the first thing a map is for.
+
+Traffic runs as particles along the edges: speed follows call frequency,
+density follows volume, and colour follows the edge. When a call site migrates,
+its stream turns emerald and visibly thins — the picture of a bill going down.
+When one is held back, its stream stays dense and picks up the warning amber.
 
 The rollout ends with one call site migrated, one in shadow, one on HOLD, and
 sixteen unmeasured by design. The sixteen are the point as much as the one: a
@@ -80,6 +103,7 @@ footer.
 ```
 index.html app.js style.css   the page
 lib/d3.v7.min.js              D3 version seven, vendored for offline use
+lib/inter-variable-latin.woff2 the typeface, vendored for offline use
 schema/trace.schema.json      the canonical trace schema, exported and versioned
 scripts/export_schema.py      pulls that schema from the measurement workbench
 scripts/gen_demo_traces.py    the synthetic world, seeded
@@ -89,6 +113,26 @@ data/decision_cards.json      the decision cards, authored by hand
 tests/                        data tests, run with pytest
 tests/browser/                optional page tests, run with node and jsdom
 ```
+
+## The visual language
+
+**The grid.** The stage is a fixed 1440 by 900 rectangle scaled by one uniform
+factor to fit the screen it lands on, divided into five bands that never
+overlap: header, canvas, caption, controls, footer. Every band's position and
+height is a custom property in `style.css`, and `tests/test_layout.py` checks
+by arithmetic that they tile and fit. The graph is clamped to the canvas band —
+the camera refits with six percent of padding on every beat change, and the
+band clips anything the camera gets wrong. Overlays slide over the canvas as
+glass cards and the camera pans out from under them rather than fighting for
+the pixels.
+
+**The palette.** Deep space: background `#0A0E17`, a cyan accent for flow and
+activity, dormant call sites at `#1E293B` and near invisible. Spend reads as
+colour temperature along a single ramp — `#22D3EE` cyan to `#8B5CF6` violet to
+`#EC4899` magenta. There is no orange anywhere on the page except one amber,
+`#F59E0B`, reserved for a call site whose gates did not clear. One amber ring
+on one glyph reads as a warning without needing a legend, which only works if
+nothing else on the page is amber. `tests/test_layout.py` enforces that too.
 
 ## The schema contract
 
