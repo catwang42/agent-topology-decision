@@ -1,0 +1,160 @@
+{
+  "synthetic": true,
+  "notice": "ILLUSTRATIVE DEMO — synthetic traces. Every value in this file is invented to show the SHAPE of a migration decision. None of it is measured. It is not evidence about any model, any vendor, or any workload.",
+  "file": "data/decision_cards.json",
+  "attach_real_values_here": "This file is the single place a real scorecard would attach. Replace the card bodies, keep the keys, and the page renders measured values with no other change. Until that happens the honesty badge stays as it is.",
+  "gates_contract": {
+    "version": 1,
+    "hash": "a7f3c1d90e42",
+    "hash_is_synthetic": true,
+    "file": "gates.yaml",
+    "agreed_on": "2026-06-19",
+    "note": "The hash is what makes the contract checkable: it pins which bounds were agreed, before anything was run. A verdict quoted without it is a verdict whose goalposts can move.",
+    "bounds": {
+      "quality_delta_pp": ">= -2.0",
+      "structured_output_validity": ">= 0.99",
+      "groundedness_delta_pp": ">= -1.0",
+      "shadow_agreement": ">= 0.9",
+      "cost_savings_pct": ">= 30.0",
+      "latency_p95": "<= incumbent p95"
+    },
+    "rule": "Gates are checked against the bound of the ninety five percent confidence range, so a passing gate licenses parity within measurement under pre-agreed bounds — never zero quality drop."
+  },
+  "incumbent": { "id": "incumbent-general-v1", "label": "Incumbent general model" },
+  "candidate": { "id": "candidate-efficient-v1", "label": "Candidate efficient model" },
+  "cards": {
+    "chunk_summarizer": {
+      "call_site": "chunk_summarizer",
+      "label": "Chunk Summarizer",
+      "rollout_status": "hold",
+      "verdict": "UNDETERMINED",
+      "verdict_tone": "hold",
+      "verdict_line": "Two gates did not clear. No verdict is issued and the canary is rolled back.",
+      "gates_evaluated": "6 of 6",
+      "headline": [
+        {
+          "name": "Quality delta",
+          "value": "−2.4 pp",
+          "range": "[−5.1 pp, +0.3 pp]",
+          "basis": "paired, n = 70",
+          "result": "FAIL"
+        },
+        {
+          "name": "Cost delta",
+          "value": "−54.0%",
+          "range": "[−55.8%, −52.1%]",
+          "basis": "per call tokens at the synthetic price book",
+          "result": "PASS"
+        },
+        {
+          "name": "Latency, ninety fifth percentile",
+          "value": "7,400 ms",
+          "range": "[6,000 ms, 7,600 ms]",
+          "basis": "incumbent measured at 6,900 ms",
+          "result": "FAIL"
+        }
+      ],
+      "gates": [
+        { "name": "quality_delta_pp", "bound": ">= -2.0", "observed": "−2.4 pp [−5.1 pp, +0.3 pp]", "result": "FAIL" },
+        { "name": "structured_output_validity", "bound": ">= 0.99", "observed": "1.000 [1.000, 1.000]", "result": "PASS" },
+        { "name": "groundedness_delta_pp", "bound": ">= -1.0", "observed": "+0.0 pp [+0.0 pp, +0.0 pp]", "result": "PASS" },
+        { "name": "shadow_agreement", "bound": ">= 0.9", "observed": "0.968 [0.921, 1.000]", "result": "PASS" },
+        { "name": "cost_savings_pct", "bound": ">= 30.0", "observed": "54.0% [52.1%, 55.8%]", "result": "PASS" },
+        { "name": "latency_p95", "bound": "<= incumbent p95", "observed": "7,400 ms [6,000 ms, 7,600 ms]", "result": "FAIL" }
+      ],
+      "why": "The quality range spans zero, so a drop larger than the agreed bound cannot be ruled out. That is a failure of precision, not a demonstrated regression — and it is still a failure, because the contract asks for parity to be shown, not assumed. The biggest saving on the map is the one that did not clear.",
+      "next": "Widen the sample to narrow the quality range, and re-probe latency on production infrastructure. Re-run against the same gates hash."
+    },
+    "field_extractor": {
+      "call_site": "field_extractor",
+      "label": "Field Extractor",
+      "rollout_status": "migrated",
+      "verdict": "MIGRATE",
+      "verdict_tone": "migrate",
+      "verdict_line": "All six gates cleared against the bounds agreed before the run.",
+      "gates_evaluated": "6 of 6",
+      "headline": [
+        {
+          "name": "Quality delta",
+          "value": "+0.6 pp",
+          "range": "[+0.1 pp, +1.2 pp]",
+          "basis": "paired, n = 70",
+          "result": "PASS"
+        },
+        {
+          "name": "Cost delta",
+          "value": "−62.0%",
+          "range": "[−63.1%, −60.8%]",
+          "basis": "per call tokens at the synthetic price book",
+          "result": "PASS"
+        },
+        {
+          "name": "Latency, ninety fifth percentile",
+          "value": "4,100 ms",
+          "range": "[3,600 ms, 4,400 ms]",
+          "basis": "incumbent measured at 5,200 ms",
+          "result": "PASS"
+        }
+      ],
+      "gates": [
+        { "name": "quality_delta_pp", "bound": ">= -2.0", "observed": "+0.6 pp [+0.1 pp, +1.2 pp]", "result": "PASS" },
+        { "name": "structured_output_validity", "bound": ">= 0.99", "observed": "1.000 [1.000, 1.000]", "result": "PASS" },
+        { "name": "groundedness_delta_pp", "bound": ">= -1.0", "observed": "+0.0 pp [+0.0 pp, +0.0 pp]", "result": "PASS" },
+        { "name": "shadow_agreement", "bound": ">= 0.9", "observed": "0.944 [0.902, 0.981]", "result": "PASS" },
+        { "name": "cost_savings_pct", "bound": ">= 30.0", "observed": "62.0% [60.8%, 63.1%]", "result": "PASS" },
+        { "name": "latency_p95", "bound": "<= incumbent p95", "observed": "4,100 ms [3,600 ms, 4,400 ms]", "result": "PASS" }
+      ],
+      "why": "The entire quality range sits above the bound, so parity is shown rather than assumed. This is the second largest call site on the map, which is why moving it alone is visible on the bill.",
+      "next": "Serving the candidate. Keep the shadow comparison running for four weeks so a regression shows up as a diff, not as a surprise."
+    },
+    "response_drafter": {
+      "call_site": "response_drafter",
+      "label": "Response Drafter",
+      "rollout_status": "shadow",
+      "verdict": "NO VERDICT YET",
+      "verdict_tone": "pending",
+      "verdict_line": "Measurement is in flight. Gates are agreed and not yet evaluated.",
+      "gates_evaluated": "0 of 6",
+      "headline": [
+        {
+          "name": "Quality delta",
+          "value": "not yet evaluated",
+          "range": "",
+          "basis": "shadow comparison started week eight",
+          "result": "PENDING"
+        },
+        {
+          "name": "Cost delta",
+          "value": "not yet evaluated",
+          "range": "",
+          "basis": "shadow arm runs off production, so the bill is unchanged",
+          "result": "PENDING"
+        },
+        {
+          "name": "Latency, ninety fifth percentile",
+          "value": "not yet evaluated",
+          "range": "",
+          "basis": "",
+          "result": "PENDING"
+        }
+      ],
+      "gates": [
+        { "name": "quality_delta_pp", "bound": ">= -2.0", "observed": "not yet evaluated", "result": "PENDING" },
+        { "name": "structured_output_validity", "bound": ">= 0.99", "observed": "not yet evaluated", "result": "PENDING" },
+        { "name": "groundedness_delta_pp", "bound": ">= -1.0", "observed": "not yet evaluated", "result": "PENDING" },
+        { "name": "shadow_agreement", "bound": ">= 0.9", "observed": "not yet evaluated", "result": "PENDING" },
+        { "name": "cost_savings_pct", "bound": ">= 30.0", "observed": "not yet evaluated", "result": "PENDING" },
+        { "name": "latency_p95", "bound": "<= incumbent p95", "observed": "not yet evaluated", "result": "PENDING" }
+      ],
+      "why": "An empty card is the correct card for a call site whose measurement has not finished. The gates were agreed first, so the numbers cannot be chosen to fit the answer once they arrive.",
+      "next": "Let the shadow comparison run to its pre-agreed sample size, then evaluate against gates hash a7f3c1d90e42."
+    }
+  },
+  "unmeasured_card": {
+    "verdict": "NOT MEASURED",
+    "verdict_tone": "unmeasured",
+    "verdict_line": "No instrument has been pointed at this call site.",
+    "why": "This call site is unmeasured by design. It does not carry enough spend to pay for the measurement, and the map is what tells you that. No verdict is available and none is implied.",
+    "next": "Leave it. Revisit if its spend share moves."
+  }
+}

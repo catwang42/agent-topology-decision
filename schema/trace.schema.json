@@ -1,0 +1,238 @@
+{
+  "$defs": {
+    "LatencyMs": {
+      "additionalProperties": false,
+      "properties": {
+        "total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total"
+        },
+        "ttft": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ttft"
+        }
+      },
+      "title": "LatencyMs",
+      "type": "object"
+    },
+    "ToolCall": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "additionalProperties": true,
+          "title": "Args",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ToolCall",
+      "type": "object"
+    },
+    "TraceInput": {
+      "additionalProperties": false,
+      "properties": {
+        "context_chunks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Context Chunks",
+          "type": "array"
+        },
+        "messages": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Messages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "messages"
+      ],
+      "title": "TraceInput",
+      "type": "object"
+    },
+    "TraceOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "json": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "items": {},
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Json"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        }
+      },
+      "title": "TraceOutput",
+      "type": "object"
+    },
+    "Usage": {
+      "additionalProperties": false,
+      "properties": {
+        "cached_tokens": {
+          "default": 0,
+          "title": "Cached Tokens",
+          "type": "integer"
+        },
+        "input_tokens": {
+          "default": 0,
+          "title": "Input Tokens",
+          "type": "integer"
+        },
+        "output_tokens": {
+          "default": 0,
+          "title": "Output Tokens",
+          "type": "integer"
+        }
+      },
+      "title": "Usage",
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/catwang42/agent-topology-decision/schema/trace.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One recorded model call. Exported from the agent migration workbench canonical trace model. Do not hand edit; regenerate with scripts/export_schema.py.",
+  "properties": {
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "input": {
+      "$ref": "#/$defs/TraceInput"
+    },
+    "latency_ms": {
+      "$ref": "#/$defs/LatencyMs"
+    },
+    "model": {
+      "title": "Model",
+      "type": "string"
+    },
+    "output": {
+      "$ref": "#/$defs/TraceOutput"
+    },
+    "provenance": {
+      "enum": [
+        "synthetic",
+        "customer"
+      ],
+      "title": "Provenance",
+      "type": "string"
+    },
+    "status": {
+      "default": "ok",
+      "enum": [
+        "ok",
+        "error"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "subagent": {
+      "title": "Subagent",
+      "type": "string"
+    },
+    "system_prompt_sha": {
+      "title": "System Prompt Sha",
+      "type": "string"
+    },
+    "tool_calls": {
+      "items": {
+        "$ref": "#/$defs/ToolCall"
+      },
+      "title": "Tool Calls",
+      "type": "array"
+    },
+    "tools_offered": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tools Offered",
+      "type": "array"
+    },
+    "trace_id": {
+      "title": "Trace Id",
+      "type": "string"
+    },
+    "ts": {
+      "format": "date-time",
+      "title": "Ts",
+      "type": "string"
+    },
+    "usage": {
+      "$ref": "#/$defs/Usage"
+    }
+  },
+  "required": [
+    "trace_id",
+    "subagent",
+    "provenance",
+    "ts",
+    "model",
+    "system_prompt_sha",
+    "input"
+  ],
+  "title": "Trace",
+  "type": "object",
+  "x-provenance": {
+    "exported_by": "scripts/export_schema.py",
+    "exported_on": "2026-08-18",
+    "note": "Structural contract only. This repository generates synthetic traces that conform to this shape. No measured values are carried across from the workbench.",
+    "source_commit": "88a1448d8340bc5a5cd63e006e1963c51512932f",
+    "source_path": "amw/traces/schema.py",
+    "source_repository": "https://github.com/catwang42/agent-migration-workbench"
+  },
+  "x-schema-version": "1.0.0"
+}

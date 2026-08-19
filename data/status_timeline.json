@@ -1,0 +1,88 @@
+{
+  "synthetic": true,
+  "notice": "ILLUSTRATIVE DEMO — synthetic traces. This rollout is authored to show how a per call site migration is sequenced. It records no real rollout and no real decision.",
+  "authored_by_hand": true,
+  "file": "data/status_timeline.json",
+  "statuses": {
+    "unmeasured": {
+      "label": "Unmeasured",
+      "order": 0,
+      "cost_multiplier": 1.0,
+      "meaning": "No instrument has been pointed at this call site. No verdict exists, and none is implied."
+    },
+    "measured": {
+      "label": "Measured",
+      "order": 1,
+      "cost_multiplier": 1.0,
+      "meaning": "Run through the bench against pre-agreed gates. Still serving the incumbent model in production."
+    },
+    "shadow": {
+      "label": "Shadow",
+      "order": 2,
+      "cost_multiplier": 1.0,
+      "meaning": "The candidate answers alongside the incumbent and is compared. Production still serves the incumbent, so production spend is unchanged."
+    },
+    "canary": {
+      "label": "Canary",
+      "order": 3,
+      "cost_multiplier": 0.85,
+      "meaning": "A slice of live traffic is served by the candidate. Part of the spend moves."
+    },
+    "migrated": {
+      "label": "Migrated",
+      "order": 4,
+      "cost_multiplier": 0.38,
+      "meaning": "The candidate serves this call site. The spend at this call site drops to the candidate's rate."
+    },
+    "hold": {
+      "label": "Hold",
+      "order": 5,
+      "cost_multiplier": 1.0,
+      "meaning": "Measured, and the gates did not clear. The canary is rolled back and the incumbent keeps serving. Spend returns to where it was."
+    }
+  },
+  "weeks": [
+    { "week": 1, "start": "2026-06-23", "end": "2026-06-29" },
+    { "week": 2, "start": "2026-06-30", "end": "2026-07-06" },
+    { "week": 3, "start": "2026-07-07", "end": "2026-07-13" },
+    { "week": 4, "start": "2026-07-14", "end": "2026-07-20" },
+    { "week": 5, "start": "2026-07-21", "end": "2026-07-27" },
+    { "week": 6, "start": "2026-07-28", "end": "2026-08-03" },
+    { "week": 7, "start": "2026-08-04", "end": "2026-08-10" },
+    { "week": 8, "start": "2026-08-11", "end": "2026-08-17" }
+  ],
+  "default_week": 1,
+  "timeline": {
+    "chunk_summarizer": ["unmeasured", "measured", "measured", "shadow", "shadow", "canary", "canary", "hold"],
+    "field_extractor": ["unmeasured", "unmeasured", "measured", "measured", "shadow", "canary", "migrated", "migrated"],
+    "response_drafter": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "measured", "measured", "shadow"],
+    "conversation_orchestrator": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured"],
+    "intent_classifier": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured"],
+    "language_detector": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured"],
+    "skills_loader": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured"],
+    "sentiment_reader": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured"],
+    "question_rewriter": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured"],
+    "account_database_lookup": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured"],
+    "knowledge_base_retrieval": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured"],
+    "refund_calculator_decider": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured"],
+    "policy_engine_check": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured"],
+    "customer_record_action": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured"],
+    "compliance_checker": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured"],
+    "redaction_filter": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured"],
+    "ticketing_action": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured"],
+    "escalation_note_writer": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured"],
+    "summary_title_writer": ["unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured", "unmeasured"]
+  },
+  "final_scoreboard": {
+    "migrated": 1,
+    "shadow": 1,
+    "hold": 1,
+    "unmeasured": 16,
+    "note": "Sixteen call sites are unmeasured by design, not by neglect. Measuring them costs more than they spend."
+  },
+  "notes": [
+    "Shadow does not lower production spend. Both arms run, and only the incumbent is served, so the bill is unchanged while the comparison is gathered.",
+    "The bill ticks back up between week seven and week eight. That is the chunk summarizer's canary being rolled back when its gates did not clear. A rollback costing money back is the honest shape of this, not a glitch.",
+    "Every status here is authored. Nothing in this file was measured."
+  ]
+}

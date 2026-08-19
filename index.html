@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>The Decision Layer — where model migration is actually decided</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="scaler">
+<div id="stage">
+
+  <!-- Honesty chrome, always on screen. -->
+  <div id="badge" title="Nothing on this screen was measured.">
+    <span class="badge-dot"></span>ILLUSTRATIVE DEMO — synthetic traces
+  </div>
+
+  <header id="masthead">
+    <h1>The Decision Layer</h1>
+    <p class="sub">Enterprise customer support agent — thirty day traffic profile</p>
+  </header>
+
+  <!-- Beat zero: the question types itself. -->
+  <div id="coldopen">
+    <div class="question-frame">
+      <span class="question-label">Customer</span>
+      <div id="typed-question"><span id="typed-text"></span><span id="caret"></span></div>
+    </div>
+  </div>
+
+  <!-- Beat one: the call counter. -->
+  <div id="counter">
+    <div id="counter-value">0</div>
+    <div id="counter-label">model calls in this one trajectory</div>
+  </div>
+
+  <svg id="graph" viewBox="0 0 1000 760" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <pattern id="reasoning-stripe" width="6" height="6" patternUnits="userSpaceOnUse"
+               patternTransform="rotate(45)">
+        <rect width="6" height="6" fill="none"></rect>
+        <rect width="2.4" height="6" fill="#FFD9B0" opacity="0.85"></rect>
+      </pattern>
+      <radialGradient id="hot-glow">
+        <stop offset="0%" stop-color="#FF7A2F" stop-opacity="0.55"></stop>
+        <stop offset="60%" stop-color="#FF7A2F" stop-opacity="0.14"></stop>
+        <stop offset="100%" stop-color="#FF7A2F" stop-opacity="0"></stop>
+      </radialGradient>
+    </defs>
+    <g id="viewport">
+      <g id="layer-edges"></g>
+      <g id="layer-glow"></g>
+      <g id="layer-nodes"></g>
+      <g id="layer-flyer"></g>
+    </g>
+  </svg>
+
+  <!-- Corner filters. They really filter. -->
+  <div id="filters">
+    <div class="filter-row">
+      <span class="filter-label">Environment</span>
+      <div class="chips" id="filter-environment"></div>
+    </div>
+    <div class="filter-row">
+      <span class="filter-label">Team</span>
+      <div class="chips" id="filter-team"></div>
+    </div>
+  </div>
+
+  <!-- Side panel: spend concentration. -->
+  <aside id="panel">
+    <div class="panel-head">
+      <h2>Where the money is</h2>
+      <p id="panel-sub">Thirty day window</p>
+    </div>
+    <div id="concentration"></div>
+    <div id="spend-bars"></div>
+    <div class="panel-foot" id="panel-foot"></div>
+  </aside>
+
+  <!-- Beat six: the decision card. -->
+  <aside id="card" aria-hidden="true">
+    <button id="card-close" title="Close">×</button>
+    <div id="card-body"></div>
+  </aside>
+
+  <!-- Beat seven: the rollout scrubber. -->
+  <div id="scrubber">
+    <div class="scrub-head">
+      <span class="scrub-title">Rollout week</span>
+      <span id="scrub-week">1</span>
+      <span class="scrub-dates" id="scrub-dates"></span>
+      <span class="scrub-spend" id="scrub-spend"></span>
+    </div>
+    <input type="range" id="scrub-range" min="1" max="8" step="1" value="1">
+    <div class="scrub-ticks" id="scrub-ticks"></div>
+  </div>
+
+  <!-- Beat eight: the scoreboard. -->
+  <div id="scoreboard" aria-hidden="true">
+    <h2>Eight weeks in</h2>
+    <div id="scoreboard-tiles"></div>
+    <p id="scoreboard-line">
+      The map finds the money. The instruments end the debate. The contract makes it safe.
+      That's the decision layer.
+    </p>
+    <div id="scoreboard-links"></div>
+  </div>
+
+  <!-- The caption strip: the presenter's line, verbatim. -->
+  <div id="caption">
+    <div id="caption-beat"></div>
+    <div id="caption-line"></div>
+  </div>
+
+  <div id="hint">→ or space to advance · ← to go back</div>
+
+  <footer id="footer">
+    <span id="footer-provenance"></span>
+    <span class="footer-sep">·</span>
+    <span>generator <a href="scripts/gen_demo_traces.py">scripts/gen_demo_traces.py</a></span>
+    <span class="footer-sep">·</span>
+    <span>aggregator <a href="scripts/aggregate.py">scripts/aggregate.py</a></span>
+    <span class="footer-sep">·</span>
+    <span>rollout <a href="data/status_timeline.json">data/status_timeline.json</a></span>
+  </footer>
+
+  <div id="tooltip" aria-hidden="true"></div>
+
+</div>
+</div>
+
+<div id="nodata">
+  <h2>The data bundle is missing.</h2>
+  <p>Run the two scripts, then reload this page:</p>
+  <pre>python3 scripts/gen_demo_traces.py
+python3 scripts/aggregate.py</pre>
+</div>
+
+<!-- D3 version seven, vendored. The local copy loads first so that opening this
+     file from a disk path makes no network request at all. The pinned content
+     delivery network copy is the fallback, for the case where someone has this
+     page without its lib directory. -->
+<script src="lib/d3.v7.min.js"></script>
+<script>window.d3 || document.write('<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"><\/script>');</script>
+<script src="data/demo_data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

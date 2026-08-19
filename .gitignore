@@ -1,0 +1,20 @@
+# This repository has no build step and no package manager. If any of these
+# appear, something has been added that should not have been.
+node_modules/
+package.json
+package-lock.json
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# The generated data IS committed on purpose: the page must open from a file
+# path with no server, no network, and no prior build. Someone who clones this
+# repository and double clicks index.html gets the demo.
